@@ -1,0 +1,31 @@
+[server]
+headless = true
+port = 8501
+maxUploadSize = 20
+enableStaticServing = false
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"
+primaryColor = "#087F72"
+backgroundColor = "#F5F7FA"
+secondaryBackgroundColor = "#EDF2F5"
+textColor = "#182C3B"
+borderColor = "#E3E9EF"
+baseRadius = "12px"
+buttonRadius = "10px"
+font = "sans-serif"
+baseFontSize = 14
+headingFontSizes = ["36px", "26px", "20px", "17px", "15px", "14px"]
+headingFontWeights = [700, 650, 600, 600, 600, 600]
+showWidgetBorder = true
+chartCategoricalColors = ["#0C9B8B", "#7083CF", "#D89A45", "#5C8298"]
+
+[theme.sidebar]
+backgroundColor = "#101F2E"
+secondaryBackgroundColor = "#1A3041"
+textColor = "#DEE9EF"
+primaryColor = "#6AE1C7"
+borderColor = "#263D4C"
