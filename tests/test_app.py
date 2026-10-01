@@ -99,3 +99,33 @@ def test_attached_lab_report_is_available_in_all_patient_sections():
         if page == "reports":
             assert len(app.get("download_button")) == 3
     assert len(ws.reports[-1]["claims"]) == 29
+
+
+def test_old_session_workspace_upgrades_without_losing_uploaded_records():
+    from types import SimpleNamespace
+    from healthlens.workspace import Workspace
+    app = AppTest.from_file("app.py", default_timeout=30).run()
+    seed_app(app)
+    ws = app.session_state.workspace
+    ws.obs("HL-2048")[0].status = "needs_review"
+    originals = ws.originals.copy()
+    documents = list(ws.documents)
+    observation_ids = [o.id for o in ws.observations]
+    revisions = list(ws.revisions)
+    legacy = SimpleNamespace(**vars(ws))
+    assert not hasattr(legacy, "activate_pending_uploads")
+    app.session_state.workspace = legacy
+    app.run()
+    assert not app.exception
+    upgraded = app.session_state.workspace
+    assert type(upgraded) is Workspace
+    assert upgraded.originals == originals
+    assert upgraded.documents == documents
+    assert [o.id for o in upgraded.observations] == observation_ids
+    assert upgraded.revisions == revisions
+    assert app.session_state.patient_id == "HL-2048"
+    assert upgraded.obs("HL-2048")[0].status == "accepted"
+    assert upgraded.reports[-1]["fingerprint"] == upgraded.fingerprint("HL-2048")
+    app.switch_page("app_pages/trends.py").run()
+    assert not app.exception
+    assert len(app.get("plotly_chart")) == 1

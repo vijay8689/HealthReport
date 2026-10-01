@@ -312,3 +312,17 @@ def test_retry_upgrades_text_only_import_without_duplicate_documents():
     assert ws.reports[-1]["fingerprint"] == ws.fingerprint("HL-2048")
     duplicate, repeated = ingest(SAMPLE.encode(), "sample.txt", "HL-2048")
     assert not ws.add(duplicate, repeated, SAMPLE.encode())
+
+
+def test_session_upgrade_initializes_missing_collections_without_resetting_data():
+    from types import SimpleNamespace
+    ws = seeded_workspace()
+    legacy = SimpleNamespace(patients=ws.patients, documents=ws.documents, observations=ws.observations)
+    upgraded = Workspace.from_session(legacy)
+    assert upgraded.patients is ws.patients
+    assert upgraded.documents is ws.documents
+    assert upgraded.observations is ws.observations
+    assert upgraded.reports == []
+    assert upgraded.revisions == []
+    assert upgraded.originals == {}
+    assert Workspace.from_session(upgraded) is upgraded

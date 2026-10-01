@@ -12,8 +12,7 @@ if os.getenv("APP_MODE", "demo") != "demo":
     st.error("This release supports synthetic demo mode only. Connected patient-data deployment is not enabled.")
     st.stop()
 
-if "workspace" not in st.session_state:
-    st.session_state.workspace = Workspace()
+st.session_state.workspace = Workspace.from_session(st.session_state.get("workspace"))
 st.session_state.workspace.ensure_demo_records()
 st.session_state.workspace.activate_pending_uploads()
 if not st.session_state.workspace.patients:

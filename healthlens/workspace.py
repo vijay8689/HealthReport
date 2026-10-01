@@ -16,6 +16,23 @@ class Workspace:
         self.originals: dict[str, bytes] = {}
         self.ensure_demo_records()
 
+    @classmethod
+    def from_session(cls, existing):
+        """Upgrade session objects retained from an earlier app version in place."""
+        if existing is None:
+            return cls()
+        if type(existing) is cls:
+            workspace = existing
+        else:
+            workspace = cls.__new__(cls)
+            workspace.__dict__.update(vars(existing))
+        # Older releases may not have every repository collection.
+        defaults = dict(patients=[p.model_copy(deep=True) for p in PATIENTS],
+                        documents=[], observations=[], revisions=[], reports=[], originals={})
+        for name, value in defaults.items():
+            workspace.__dict__.setdefault(name, value)
+        return workspace
+
     def ensure_demo_records(self):
         """Add the bundled dummy history to new and already-open demo sessions."""
         if self.docs("DUMMY-0001"):
