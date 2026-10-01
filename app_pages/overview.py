@@ -37,7 +37,7 @@ with main:
             st.plotly_chart(lab_chart(rows), config={"displayModeBar": False}, key="overview_plot")
             st.caption("● Recorded value   ·   Shaded area: source reference range")
         else:
-            st.info("Upload and review a report to see the first trend.")
+            st.info("Upload a report to see the first trend.")
 with side:
     with st.container(border=True, key="snapshot_panel"):
         panel_title("Patient snapshot", "A little context for the bigger picture")

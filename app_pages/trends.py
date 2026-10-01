@@ -10,7 +10,7 @@ ws, pid = workspace(), patient_id()
 heading("See the story over time.", "Explore source-linked laboratory results, with the context that makes them meaningful.", "LONGITUDINAL INSIGHTS")
 obs = eligible(ws.obs(pid))
 if not obs:
-    st.info("No reviewed observations yet. Import a report and review its extracted values first.")
+    st.info("No observations yet. Import a report to see its extracted values automatically.")
 else:
     categories = sorted({o.category for o in obs})
     category = st.pills("Clinical domain", ["All", *categories], default="All") or "All"

@@ -22,11 +22,12 @@ Open http://localhost:8501. On Linux/macOS, use `.venv/bin/python` instead. OCR 
 - Three synthetic patient profiles and nine source reports; eight lab markers with dated provenance.
 - Patient switching, custom synthetic profiles, document search, filtering, text preview, source download.
 - PDF/DOCX/TXT parsing and optional PNG/JPEG/scanned PDF OCR; bounded upload sizes and duplicate detection.
-- Explicit patient-ID matching and quarantine for missing or conflicting identifiers.
-- Conservative four-column laboratory extraction; imported observations require human review.
-- Corrections, rejections, append-only revision history, stale-analysis detection.
+- Patient-name matching (allowing first names or a prefix of the full name, ignoring case, spacing, and common titles); patient IDs do not need to match. Missing or conflicting names are quarantined.
+- Laboratory extraction for pipe-separated rows, multi-line panels, and ruled five-column PDF tables with methods and source ranges; imported observations are saved automatically and immediately available for trends and analysis.
+- Source evidence viewer, retained revision history, and stale-analysis detection.
 - Plotly trends with units, source links in tooltips, per-observation source ranges, date filtering and CSV export.
 - Real LangGraph fan-out/join workflow: scope validation, trends, range checks, contradictions, data gaps, evidence mapping, evidence integrity check.
+- Collection-date parsing supports ISO, day/month/year, and month-name dates, with per-page provenance.
 - Source-linked deterministic summaries; no simulated LLM output, confidence score, or risk model.
 - PDF/JSON analysis downloads and formula-safe CSV observations.
 - Session-local deletion and demo reset. OS reduced-motion support and an in-app motion toggle.
@@ -36,8 +37,8 @@ Open http://localhost:8501. On Linux/macOS, use `.venv/bin/python` instead. OCR 
 1. Select **Alex Morgan · HL-2048**.
 2. Open **Documents → Upload reports** and download the sample TXT.
 3. Upload the sample and confirm it is synthetic.
-4. In **Evidence & review**, filter to **Needs review** and accept/correct each value with a review reason.
-5. Open **AI analysis → Run analysis**, inspect the sources, and download a report.
+4. Open **Lab trends** to see saved observations, or **Evidence & review** to inspect their source.
+5. Open **AI analysis** to inspect the automatically generated summary, and download a report.
 
 The supported text extraction format is explicit and intentionally narrow:
 

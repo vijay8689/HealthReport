@@ -6,7 +6,7 @@ The session repository is isolated by Streamlit browser session; it is not an au
 
 Uploaded content is parsed as data. No file macros, instructions, external links, or attachments are executed. Output HTML uses escaping. PDF export escapes text; CSV neutralizes formula-leading strings. Parsers enforce signature checks, byte/page/text/pixel/archive limits. English OCR has per-image timeouts and a five-scanned-page demo cap. Parsing runs in the Streamlit process; process sandboxing and total-job time limits are future connected-deployment work.
 
-Patient IDs must match the selected synthetic profile before extraction. All observations sent to the graph are checked against that patient. Missing identifiers quarantine the file. This is a conservative demo rule, not medical identity verification.
+The report patient name must match the selected profile before extraction. Matching ignores case, extra whitespace, and common titles, including titles without a following space. A profile may use a first name or a prefix of the full report name; unrelated and multiple names are excluded. Source patient IDs are not required and do not need to match. Missing or conflicting names quarantine the file. Observations retain the selected internal patient ID, and the graph checks their patient scope. This is a demo association rule, not medical identity verification.
 
 Original evidence is immutable during review. Changes create revisions and invalidate previous analyses. Deleting a document also removes observations, revisions, and patient analysis reports from the session. No app-managed backups are created.
 

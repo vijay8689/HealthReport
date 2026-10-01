@@ -29,7 +29,7 @@ if run:
 if not current:
     with st.container(border=True):
         html('<div class="empty-graphic">✧</div><div class="empty-title">Clarity is a workflow away.</div>')
-        st.write("Run analysis to assemble reviewed observations, source-based range checks, longitudinal changes, and data gaps.")
+        st.write("Run analysis to assemble saved observations, source-based range checks, longitudinal changes, and data gaps.")
         if reports:
             st.warning("The records changed since the previous analysis. Regenerate before downloading a current report.")
 else:

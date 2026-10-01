@@ -15,6 +15,7 @@ if os.getenv("APP_MODE", "demo") != "demo":
 if "workspace" not in st.session_state:
     st.session_state.workspace = Workspace()
 st.session_state.workspace.ensure_demo_records()
+st.session_state.workspace.activate_pending_uploads()
 if not st.session_state.workspace.patients:
     st.info("No patient records are available. Import or connect a patient workspace to begin.")
     st.stop()
@@ -55,7 +56,7 @@ with st.sidebar:
     html('<div class="nav-label">MANAGE</div>')
     for page in pages[7:]:
         st.page_link(page)
-    html('<div class="sidebar-note"><div class="eyebrow">BUILT AROUND EVIDENCE</div><h4>Every insight. A source.</h4><p>Explore connected records with a transparent, human-reviewed workflow.</p></div>')
+    html('<div class="sidebar-note"><div class="eyebrow">BUILT AROUND EVIDENCE</div><h4>Every insight. A source.</h4><p>Explore connected records with a transparent, source-linked workflow.</p></div>')
     active_profile = st.session_state.workspace.patient(selected_patient)
     if selected_patient == "DUMMY-0001":
         profile_avatar, profile_title, profile_detail = "HL", "Demo workspace", "Synthetic data only"

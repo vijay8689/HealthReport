@@ -35,18 +35,18 @@ def topbar(title):
 
 
 def hero():
-    html('''<section class="hero"><div class="hero-copy"><div class="eyebrow"><span class="dot"></span> CLARITY STARTS WITH YOUR RECORDS</div><h1>A clearer picture.<br><em>A healthier perspective.</em></h1><p>Turn complex health reports into connected insights.<br>Every observation grounded in your source documents.</p><div class="hero-tags"><span>◈ &nbsp; Evidence first</span><span>↗ &nbsp; Longitudinal insights</span><span>◎ &nbsp; Human reviewed</span></div></div><div class="orb-scene" aria-hidden="true"><div class="orbit"></div><div class="orb"></div><div class="orbit second"></div><div class="float-label one">CONNECTED RECORDS<b>One complete view</b></div><div class="float-label two">◈ &nbsp; SOURCE-GROUNDED<b>Clarity you can trace</b></div></div></section>''')
+    html('''<section class="hero"><div class="hero-copy"><div class="eyebrow"><span class="dot"></span> CLARITY STARTS WITH YOUR RECORDS</div><h1>A clearer picture.<br><em>A healthier perspective.</em></h1><p>Turn complex health reports into connected insights.<br>Every observation grounded in your source documents.</p><div class="hero-tags"><span>◈ &nbsp; Evidence first</span><span>↗ &nbsp; Longitudinal insights</span><span>◎ &nbsp; Source linked</span></div></div><div class="orb-scene" aria-hidden="true"><div class="orbit"></div><div class="orb"></div><div class="orbit second"></div><div class="float-label one">CONNECTED RECORDS<b>One complete view</b></div><div class="float-label two">◈ &nbsp; SOURCE-GROUNDED<b>Clarity you can trace</b></div></div></section>''')
 
 
 def stats(workspace, patient_id):
     docs, obs = workspace.docs(patient_id), workspace.obs(patient_id)
     reviewed = [o for o in obs if o.status in {"accepted", "corrected"}]
     outside = sum(comparison(o) in {"LOW", "HIGH"} for o in latest(obs))
-    review_count = sum(o.status == "needs_review" for o in obs)
+    review_count = len({o.name for o in reviewed})
     cards = [("Documents", len(docs), "▤", "Source records in this workspace"),
-             ("Reviewed observations", len(reviewed), "⌁", "<span>Traceable</span> to original evidence"),
+             ("Saved observations", len(reviewed), "⌁", "<span>Traceable</span> to original evidence"),
              ("Outside source range", outside, "↗", "Latest results · not a diagnosis"),
-             ("Awaiting review", review_count, "◎", "Human review keeps you in control")]
+             ("Lab markers", review_count, "◎", "Available from saved observations")]
     html('<div class="stat-grid">' + ''.join(f'<div class="stat"><div class="stat-top">{title}<span class="stat-symbol">{symbol}</span></div><div class="stat-number">{number:02d}</div><div class="stat-foot">{foot}</div></div>' for title, number, symbol, foot in cards) + '</div>')
 
 

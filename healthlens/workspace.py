@@ -45,14 +45,40 @@ class Workspace:
         return hashlib.sha256(manifest.encode()).hexdigest()
 
     def add(self, document, observations, original) -> bool:
-        if any(d.hash == document.hash and d.patient_id == document.patient_id for d in self.documents):
-            return False
         if any(o.patient_id != document.patient_id or o.document_id != document.id for o in observations):
             raise ValueError("Observation does not belong to the imported document.")
+        previous = next((d for d in self.documents if d.hash == document.hash and d.patient_id == document.patient_id), None)
+        if previous:
+            if previous.status not in {"Text only", "Quarantined"} or not observations or any(o.document_id == previous.id for o in self.observations):
+                return False
+            # Retry a previously unparsed upload after the extractor gains support.
+            self.documents.remove(previous)
+            self.originals.pop(previous.id, None)
         self.documents.append(document)
         self.observations.extend(observations)
         self.originals[document.id] = original
+        if observations:
+            self.refresh_analysis(document.patient_id)
         return True
+
+    def refresh_analysis(self, patient_id):
+        fingerprint = self.fingerprint(patient_id)
+        if not any(r["patient_id"] == patient_id and r["fingerprint"] == fingerprint for r in self.reports):
+            self.reports.append(analyze(patient_id, self.obs(patient_id), fingerprint))
+
+    def activate_pending_uploads(self):
+        """Make uploads from already-open sessions available without a review step."""
+        changed = set()
+        for document in self.documents:
+            if document.source != "Local upload" or document.status == "Quarantined":
+                continue
+            for observation in self.obs(document.patient_id):
+                if observation.document_id == document.id and observation.status == "needs_review":
+                    observation.status = "accepted"
+                    document.status = "Imported"
+                    changed.add(document.patient_id)
+        for patient_id in changed:
+            self.refresh_analysis(patient_id)
 
     def review(self, patient_id, observation_id, expected_version, updates, reason):
         old = next(o for o in self.obs(patient_id) if o.id == observation_id)

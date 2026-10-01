@@ -6,8 +6,6 @@ def seed_app(app):
     from healthlens.ingestion import ingest
     from healthlens.models import Patient
     doc, observations = ingest(SAMPLE.encode(), "sample.txt", "HL-2048")
-    for observation in observations:
-        observation.status = "accepted"
     app.session_state.workspace.patients.append(Patient(id="HL-2048", name="Alex Morgan", initials="AM"))
     app.session_state.workspace.add(doc, observations, SAMPLE.encode())
     app.session_state.pending_patient_id = "HL-2048"
@@ -24,7 +22,7 @@ def test_all_pages_and_analysis_flow():
     for page in ["documents", "trends", "evidence", "timeline", "reports", "connections", "settings", "analysis"]:
         app.switch_page(f"app_pages/{page}.py").run()
         assert not app.exception, f"{page}: {app.exception}"
-    next(b for b in app.button if b.label == "Run analysis").click().run()
+    assert next(b for b in app.button if b.label == "Analysis is up to date").disabled
     assert not app.exception
     assert len([r for r in app.session_state.workspace.reports if r["patient_id"] == "HL-2048"]) == 1
     app.switch_page("app_pages/reports.py").run()
@@ -47,21 +45,57 @@ def test_dummy_patient_has_sample_data_in_all_sections():
     assert next(b for b in app.button if b.label == "Analysis is up to date").disabled
 
 
-def test_upload_shortcut_and_review_handoff():
+def test_upload_shortcut_and_automatic_trends_handoff():
     from healthlens.demo import SAMPLE
     from healthlens.ingestion import ingest
     app = AppTest.from_file("app.py", default_timeout=30).run()
     next(b for b in app.button if b.label == "Upload report").click().run()
     assert not app.exception
     assert app.session_state.document_view == "Upload reports"
-    doc, obs = ingest(SAMPLE.encode(), "sample.txt", "DUMMY-0001", use_source_patient=True)
+    doc, obs = ingest(SAMPLE.encode(), "sample.txt", "HL-2048", patient_name="Alex Morgan")
     from healthlens.models import Patient
     app.session_state.workspace.patients.append(Patient(id="HL-2048", name="Alex Morgan", initials="AM"))
     app.session_state.workspace.add(doc, obs, SAMPLE.encode())
     app.session_state.last_import_patient_id = "HL-2048"
     # AppTest does not retain st.switch_page's destination for the next run.
     app.switch_page("app_pages/documents.py").run()
-    next(b for b in app.button if b.label == "Review extracted observations").click().run()
+    next(b for b in app.button if b.label == "View imported lab trends").click().run()
     assert not app.exception
-    assert app.session_state["review_filter_HL-2048"] == "Needs review"
-    assert any("Current status: needs review" in c.value for c in app.caption)
+    assert app.session_state.patient_id == "HL-2048"
+    assert len(app.get("plotly_chart")) == 1
+    app.switch_page("app_pages/evidence.py").run()
+    assert not app.exception
+    assert not any(b.label == "Save review" for b in app.button)
+    assert not app.number_input
+    assert any("Current status: accepted" in c.value for c in app.caption)
+    app.switch_page("app_pages/reports.py").run()
+    assert len(app.get("download_button")) == 3
+
+
+def test_attached_lab_report_is_available_in_all_patient_sections():
+    from pathlib import Path
+    import pytest
+    from healthlens.ingestion import ingest
+    from healthlens.models import Patient
+    source = Path("docs/Vijay_Jan_2026.pdf")
+    if not source.exists():
+        pytest.skip("User-provided validation report is not present")
+    app = AppTest.from_file("app.py", default_timeout=30).run()
+    ws = app.session_state.workspace
+    ws.patients.append(Patient(id="P-001", name="Vijay", initials="VK"))
+    document, observations = ingest(source.read_bytes(), source.name, "P-001", patient_name="Vijay")
+    ws.add(document, observations, source.read_bytes())
+    app.session_state.pending_patient_id = "P-001"
+    app.run()
+    assert not app.exception
+    assert len(ws.obs("P-001")) == 29
+    for page in ["documents", "trends", "evidence", "timeline", "analysis", "reports"]:
+        app.switch_page(f"app_pages/{page}.py").run()
+        assert not app.exception, page
+        if page == "trends":
+            assert len(app.get("plotly_chart")) == 1
+        if page == "analysis":
+            assert next(b for b in app.button if b.label == "Analysis is up to date").disabled
+        if page == "reports":
+            assert len(app.get("download_button")) == 3
+    assert len(ws.reports[-1]["claims"]) == 29

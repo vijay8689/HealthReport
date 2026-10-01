@@ -25,7 +25,7 @@ Cloud deployment remains unverified until performed against a real account. Demo
 - Module missing: install requirements using the same interpreter that starts Streamlit.
 - OCR unavailable: install Tesseract and English language data, then restart your terminal/app.
 - No extracted values: use the documented four-column sample format; unsupported layouts remain source text.
-- Quarantined document: verify the `Patient ID:` header matches the selected synthetic patient.
+- Quarantined document: verify the `Patient:` or `Patient Name:` header matches the selected patient name. A source patient ID is optional.
 - Empty analysis: accept imported observations in Evidence & review first.
 - Stale report: rerun analysis after corrections/imports.
 - Data reset: sessions are temporary; export reports before closing/reloading.

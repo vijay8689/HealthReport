@@ -3,7 +3,7 @@ import hashlib
 import io
 import re
 import zipfile
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from healthlens.models import Document, Observation
@@ -16,7 +16,6 @@ ROW = re.compile(rf"^\s*(?P<name>[^|]{{1,100}})\|\s*(?P<cmp><=|>=|<|>)?\s*(?P<va
 BLOCK_NAME = re.compile(r"^[A-Z0-9][A-Z0-9 /,&().\-]{1,100}$")
 BLOCK_VALUE = re.compile(r"^\s*(?P<cmp><=|>=|<|>)?\s*(?P<value>[-+]?\d[\d,]*(?:\.\d+)?)\s*$")
 BLOCK_RANGE = re.compile(rf"^\s*(?P<low>{NUMBER})\s*[-–]\s*(?P<high>{NUMBER})\s*(?P<unit>[^\d].*)?$")
-SAMPLE_DATE = re.compile(r"Sample Collected on\s*:\s*(\d{1,2})-(\d{1,2})-(\d{4})", re.I)
 CATEGORIES = {"hemoglobin": "Hematology", "glucose": "Metabolic", "hba1c": "Metabolic",
               "cholesterol": "Cardiovascular", "triglycer": "Cardiovascular", "vitamin": "Nutritional",
               "creatinine": "Renal", "urea": "Renal", "tsh": "Thyroid"}
@@ -62,7 +61,8 @@ def parse_bytes(content: bytes, filename: str) -> tuple[list[dict], bool]:
                 scanned = 0
                 for index, page in enumerate(pdf):
                     text = page.get_text()
-                    if len(text.strip()) < 15:
+                    page_ocr = len(text.strip()) < 15
+                    if page_ocr:
                         scanned += 1
                         if scanned > 5:
                             raise IntakeError("Demo OCR supports up to five scanned pages per file. Split this report.")
@@ -71,7 +71,10 @@ def parse_bytes(content: bytes, filename: str) -> tuple[list[dict], bool]:
                         pix = page.get_pixmap(matrix=pymupdf.Matrix(2, 2))
                         text = ocr_image(Image.open(io.BytesIO(pix.tobytes("png"))))
                         used_ocr = True
-                    pages.append({"locator": f"Page {index + 1}", "text": text})
+                    record = {"locator": f"Page {index + 1}", "text": text}
+                    if not page_ocr:
+                        record["lab_rows"] = _pdf_lab_rows(page, record["locator"])
+                    pages.append(record)
         elif ext == ".docx":
             if not zipfile.is_zipfile(io.BytesIO(content)):
                 raise IntakeError("The file signature does not match DOCX.")
@@ -108,14 +111,35 @@ def parse_bytes(content: bytes, filename: str) -> tuple[list[dict], bool]:
     return pages, used_ocr
 
 
-def _identities(pages: list[dict]) -> set[str]:
+def normalize_patient_name(value: str) -> str:
+    value = re.sub(r"^(?:(?:mrs|mr|ms|miss|dr)(?:\.\s*|\s+))+", "", value.strip(), flags=re.I)
+    return " ".join(value.casefold().split())
+
+
+def patient_name_matches(profile_name: str, report_name: str) -> bool:
+    profile = normalize_patient_name(profile_name).split()
+    report = normalize_patient_name(report_name).split()
+    # A profile may use a first name or first/middle names from the full report name.
+    return bool(profile) and report[:len(profile)] == profile
+
+
+def _patient_names(pages: list[dict]) -> set[str]:
     text = "\n".join(page["text"] for page in pages)
-    return {value.strip() for value in re.findall(r"Patient\s+ID\s*:?\s*([^\r\n]+)", text, re.I)}
+    pattern = r"^[ \t]*(?:Patient[ \t]+Name|Patient|Name)(?:[ \t]*\([^\r\n)]*\))?\s*:[ \t]*(?:\r?\n[ \t]*)?([^\r\n]+)"
+    names = set()
+    for match in re.finditer(pattern, text, re.I | re.M):
+        parts = [match.group(1).strip()]
+        # Some PDF headers wrap the patient name across consecutive text lines.
+        for line in text[match.end():].splitlines()[1:]:
+            line = line.strip()
+            if not line or not re.fullmatch(r"[^\W\d_]+(?:[ .'-]+[^\W\d_]+)*\.?", line, re.UNICODE):
+                break
+            if re.match(r"(?:patient|age|gender|sex|date|report|sample|test|health|doctor|referr)\b", line, re.I):
+                break
+            parts.append(line)
+        names.add(normalize_patient_name(" ".join(parts)))
+    return names
 
-
-def detect_patient_id(content: bytes, filename: str) -> str | None:
-    identities = _identities(parse_bytes(content, filename)[0])
-    return next(iter(identities)) if len(identities) == 1 else None
 
 
 def _clean(value: str) -> str:
@@ -129,15 +153,84 @@ def _looks_like_name(value: str) -> bool:
     return bool(letters) and BLOCK_NAME.match(value) is not None and sum(c.isupper() for c in letters) / len(letters) > .72
 
 
+def _observation_dates(text: str) -> set[date]:
+    # Collection dates describe the measurements; receipt/print dates do not.
+    labels = [r"(?:Sample\s+Collected\s+on|Collected|Collection\s+Date|Sample\s+Collection\s+Date)",
+              r"(?:Observation\s+Date|Date)", r"(?:Reported|Report\s+Date)"]
+    token = r"(\d{4}-\d{2}-\d{2}|\d{1,2}[-/](?:[A-Za-z]{3,9}|\d{1,2})[-/]\d{4})"
+    for label in labels:
+        values = re.findall(rf"^\s*{label}\s*:\s*{token}", text, re.I | re.M)
+        if not values:
+            continue
+        dates = set()
+        for value in values:
+            for fmt in ("%Y-%m-%d", "%d/%b/%Y", "%d-%b-%Y", "%d/%B/%Y", "%d-%B-%Y", "%d/%m/%Y", "%d-%m-%Y"):
+                try:
+                    dates.add(datetime.strptime(value, fmt).date())
+                    break
+                except ValueError:
+                    continue
+        return dates
+    return set()
+
+
 def _page_date(text: str, fallback: date | None) -> date | None:
-    match = SAMPLE_DATE.search(text)
-    if not match:
-        return fallback
-    day_value, month, year = map(int, match.groups())
-    try:
-        return date(year, month, day_value)
-    except ValueError:
-        return fallback
+    dates = _observation_dates(text)
+    return next(iter(dates)) if len(dates) == 1 else (None if dates else fallback)
+
+
+def _pdf_lab_rows(page, locator: str) -> list[dict]:
+    """Read ruled lab tables with an explicit five-column source header."""
+    tables = page.find_tables().tables
+    headers = []
+    for table in tables:
+        for cells in table.extract():
+            if [_clean(cell or "").casefold() for cell in cells] == ["test name", "result", "unit", "bio. ref. range", "method"]:
+                headers.append(table.bbox)
+    if not headers:
+        return []
+    rows = []
+    for table_index, table in enumerate(tables, 1):
+        if table.col_count != 5 or not any(
+            (table.bbox == header or table.bbox[1] >= header[3])
+            and abs(table.bbox[0] - header[0]) < 3 and abs(table.bbox[2] - header[2]) < 3
+            for header in headers
+        ):
+            continue
+        for row_index, cells in enumerate(table.extract(), 1):
+            if len(cells) != 5 or not cells[0] or not cells[1] or _clean(cells[0]).casefold() == "test name":
+                continue
+            rows.append(dict(cells=[cell or "" for cell in cells],
+                             locator=f"{locator}, table {table_index}, row {row_index}"))
+    return rows
+
+
+def _table_observations(page: dict, patient_id: str, document_id: str,
+                        fallback_date: date | None) -> list[Observation]:
+    observations = []
+    for row in page.get("lab_rows", []):
+        name, value, unit, reference, method = [_clean(cell) for cell in row["cells"]]
+        number = BLOCK_VALUE.fullmatch(value)
+        if not number:
+            continue  # Qualitative results, titres and intervals remain source evidence.
+        low = high = None
+        if reference:
+            limits = re.fullmatch(rf"({NUMBER})\s*[-\u2013\u2014]\s*({NUMBER})\.?", reference)
+            if limits:
+                low, high = map(float, limits.groups())
+        try:
+            observations.append(Observation(
+                patient_id=patient_id, document_id=document_id, name=name,
+                category=next((category for token, category in CATEGORIES.items() if token in name.lower()), "General"),
+                value=float(number.group("value").replace(",", "")), original_value=value,
+                comparator=number.group("cmp") or "=", unit=unit or "Not recorded",
+                low=low, high=high, date=_page_date(page["text"], fallback_date),
+                method=method or "Not recorded", locator=row["locator"],
+                source_text="\n".join(cell for cell in row["cells"] if cell),
+            ))
+        except ValueError:
+            continue
+    return observations
 
 
 def _block_observations(page: dict, patient_id: str, document_id: str,
@@ -177,35 +270,37 @@ def _block_observations(page: dict, patient_id: str, document_id: str,
 
 
 def ingest(content: bytes, filename: str, patient_id: str,
-           use_source_patient: bool = False) -> tuple[Document, list[Observation]]:
+           patient_name: str | None = None) -> tuple[Document, list[Observation]]:
     pages, used_ocr = parse_bytes(content, filename)
     text = "\n".join(page["text"] for page in pages)
-    identities = _identities(pages)
-    target_patient_id = next(iter(identities)) if use_source_patient and len(identities) == 1 else patient_id
-    mismatch = bool(identities and identities != {target_patient_id})
-    dates = set(re.findall(r"^Date:\s*(\d{4}-\d{2}-\d{2})\s*$", text, re.M))
-    dates.update(f"{year}-{month.zfill(2)}-{day_value.zfill(2)}"
-                 for day_value, month, year in SAMPLE_DATE.findall(text))
-    report_date = None
-    if len(dates) == 1:
-        try:
-            report_date = date.fromisoformat(next(iter(dates)))
-        except ValueError:
-            pass
+    names = _patient_names(pages)
+    target_patient_id = patient_id
+    mismatch = patient_name is not None and (
+        len(names) != 1 or not patient_name_matches(patient_name, next(iter(names)))
+    )
+    dates = set().union(*(_observation_dates(page["text"]) for page in pages))
+    report_date = next(iter(dates)) if len(dates) == 1 else None
     doc = Document(patient_id=target_patient_id, name=Path(filename).name, date=report_date,
                    hash=hashlib.sha256(content).hexdigest(), pages=pages, ocr=used_ocr)
-    if mismatch:
+    if mismatch or not names:
         doc.status = "Quarantined"
-        doc.warnings.append("The report's patient ID does not match the selected patient, or multiple IDs are present.")
-        return doc, []
-    if not identities:
-        doc.status = "Quarantined"
-        doc.warnings.append("No explicit Patient ID was found. The report is quarantined until patient association can be verified.")
+        if not names:
+            doc.warnings.append("No explicit patient name was found. Check the patient-name header in the source document.")
+        else:
+            detected = "; ".join(sorted(names))
+            expected = patient_name or "Not specified"
+            doc.warnings.append(
+                f"Patient name mismatch. Selected profile: {expected}. Detected report name(s): {detected}. "
+                "Select the matching patient profile or check the extracted source text. Patient IDs are not checked."
+            )
         return doc, []
     if not report_date:
-        doc.warnings.append("No single unambiguous observation date was found. Review dates before analysis.")
+        doc.warnings.append("No single observation date could be determined for this document. Results keep any collection dates found on their source pages.")
     observations = []
     for page in pages:
+        if page.get("lab_rows"):
+            observations.extend(_table_observations(page, target_patient_id, doc.id, report_date))
+            continue
         for line_no, line in enumerate(page["text"].splitlines(), 1):
             match = ROW.match(line)
             if not match:
@@ -227,12 +322,20 @@ def ingest(content: bytes, filename: str, patient_id: str,
     unique = {}
     for observation in observations:
         key = (observation.name, observation.date, observation.value,
-               observation.unit, observation.low, observation.high)
+               observation.unit, observation.low, observation.high, observation.method, observation.specimen)
         unique.setdefault(key, observation)
     observations = list(unique.values())
     if not observations:
-        doc.warnings.append("No supported laboratory rows found. Source text remains available for review.")
+        doc.warnings.append("No supported numeric laboratory rows found. Source text remains available in Evidence and Documents.")
         doc.status = "Text only"
     elif any(o.low == 0 and o.high == 0 for o in observations):
         doc.warnings.append("The source contains one or more 0-0 reference ranges. Review them before use; they are not treated as validated thresholds.")
+    non_numeric = sum(not BLOCK_VALUE.fullmatch(_clean(row["cells"][1]))
+                      for page in pages for row in page.get("lab_rows", []))
+    if non_numeric:
+        doc.warnings.append(f"{non_numeric} text, titre, or interval results are retained in source evidence and excluded from numeric trends.")
+    for observation in observations:
+        observation.status = "accepted"
+    if observations:
+        doc.status = "Imported"
     return doc, observations

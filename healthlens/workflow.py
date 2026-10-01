@@ -46,7 +46,7 @@ def gap_node(state):
     obs = state["observations"]
     gaps = []
     if not eligible(obs):
-        gaps.append("No reviewed observations are available for analysis.")
+        gaps.append("No usable observations are available for analysis.")
     for o in obs:
         if o.status == "needs_review":
             gaps.append(f"{o.name}: extraction awaits review.")
@@ -118,5 +118,5 @@ def analyze(patient_id, observations, fingerprint, on_stage=None) -> dict:
                 conflicts=state.get("conflicts", []), gaps=state.get("gaps", []), checks=state["checks"],
                 limitations=["Synthetic research demonstration; not medical advice.",
                              "No validated risk model is configured. No risk score is produced.",
-                             "Only reviewed, supported laboratory rows are analyzed. No diagnosis or treatment recommendation is generated.",
+                             "Only saved, supported laboratory rows are analyzed. No diagnosis or treatment recommendation is generated.",
                              "LangGraph orchestration uses deterministic nodes; no live LLM or semantic RAG provider is connected."])
