@@ -2,7 +2,8 @@
 import hashlib
 
 from healthlens.demo import PATIENTS, demo_records
-from healthlens.models import Document, Observation, Revision
+from healthlens.discharge import discharge_patient_names
+from healthlens.models import DischargeSummary, Document, Observation, Revision
 from healthlens.workflow import analyze
 
 
@@ -14,6 +15,7 @@ class Workspace:
         self.revisions: list[Revision] = []
         self.reports: list[dict] = []
         self.originals: dict[str, bytes] = {}
+        self.discharge_summaries: list[DischargeSummary] = []
         self.ensure_demo_records()
 
     @classmethod
@@ -28,9 +30,21 @@ class Workspace:
             workspace.__dict__.update(vars(existing))
         # Older releases may not have every repository collection.
         defaults = dict(patients=[p.model_copy(deep=True) for p in PATIENTS],
-                        documents=[], observations=[], revisions=[], reports=[], originals={})
+                        documents=[], observations=[], revisions=[], reports=[], originals={}, discharge_summaries=[])
         for name, value in defaults.items():
             workspace.__dict__.setdefault(name, value)
+        # Apply the name-presence policy to discharge uploads in open sessions.
+        documents = {d.id: d for d in workspace.documents if d.kind == "Discharge summary"}
+        for summary in workspace.discharge_summaries:
+            document = documents.get(summary.document_id)
+            if document is not None and discharge_patient_names(document.pages):
+                if summary.status == "quarantined":
+                    summary.status = "needs_review"
+                if document.status == "Quarantined":
+                    document.status = "Needs review"
+                document.warnings = [warning for warning in document.warnings
+                                     if not warning.startswith(("Patient name could not be matched to the selected profile.",
+                                                                "No patient name was found in the document."))]
         return workspace
 
     def ensure_demo_records(self):
@@ -55,6 +69,19 @@ class Workspace:
 
     def obs(self, patient_id) -> list[Observation]:
         return [o for o in self.observations if o.patient_id == patient_id]
+
+    def discharges(self, patient_id) -> list[DischargeSummary]:
+        return [s for s in self.discharge_summaries if s.patient_id == patient_id]
+
+    def add_discharge(self, document, summary, original) -> bool:
+        if document.kind != "Discharge summary" or summary.patient_id != document.patient_id or summary.document_id != document.id:
+            raise ValueError("Discharge summary does not belong to the imported document.")
+        if any(d.hash == document.hash and d.patient_id == document.patient_id and d.kind == document.kind for d in self.documents):
+            return False
+        self.documents.append(document)
+        self.discharge_summaries.append(summary)
+        self.originals[document.id] = original
+        return True
 
     def fingerprint(self, patient_id) -> str:
         manifest = "|".join(sorted(o.model_dump_json() for o in self.obs(patient_id)))
@@ -121,5 +148,6 @@ class Workspace:
         self.observations = [o for o in self.observations if o.id not in ids]
         self.revisions = [r for r in self.revisions if r.observation_id not in ids]
         self.originals.pop(document_id, None)
+        self.discharge_summaries = [s for s in self.discharge_summaries if s.document_id != document_id]
         # Remove derived reports rather than retaining deleted source content.
         self.reports = [r for r in self.reports if r["patient_id"] != patient_id]

@@ -19,7 +19,7 @@ def test_all_pages_and_analysis_flow():
     sidebar_html = " ".join(item.value for item in app.markdown)
     assert "Patient Data" in sidebar_html
     assert "Alex Morgan" in sidebar_html
-    for page in ["documents", "trends", "evidence", "timeline", "reports", "connections", "settings", "analysis"]:
+    for page in ["documents", "discharge", "trends", "evidence", "timeline", "reports", "connections", "settings", "analysis"]:
         app.switch_page(f"app_pages/{page}.py").run()
         assert not app.exception, f"{page}: {app.exception}"
     assert next(b for b in app.button if b.label == "Analysis is up to date").disabled

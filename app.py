@@ -39,6 +39,7 @@ if st.session_state.reduce_motion:
 pages = [
     st.Page("app_pages/overview.py", title="Overview", icon=":material/space_dashboard:", default=True),
     st.Page("app_pages/documents.py", title="Documents", icon=":material/folder_open:"),
+    st.Page("app_pages/discharge.py", title="Discharge summary", icon=":material/clinical_notes:"),
     st.Page("app_pages/trends.py", title="Lab trends", icon=":material/monitoring:"),
     st.Page("app_pages/analysis.py", title="AI analysis", icon=":material/auto_awesome:"),
     st.Page("app_pages/evidence.py", title="Evidence & review", icon=":material/fact_check:"),
@@ -50,10 +51,10 @@ pages = [
 nav = st.navigation(pages, position="hidden")
 with st.sidebar:
     html('<div class="brand"><div class="brand-icon">+</div><div><div class="brand-name">HealthLens<span>AI</span></div><div class="brand-sub">Clinical intelligence</div></div></div><div class="workspace-tag">◈ &nbsp; <b>Personal workspace</b> &nbsp; ⌄</div><div class="nav-label">WORKSPACE</div>')
-    for page in pages[:7]:
+    for page in pages[:-2]:
         st.page_link(page)
     html('<div class="nav-label">MANAGE</div>')
-    for page in pages[7:]:
+    for page in pages[-2:]:
         st.page_link(page)
     html('<div class="sidebar-note"><div class="eyebrow">BUILT AROUND EVIDENCE</div><h4>Every insight. A source.</h4><p>Explore connected records with a transparent, source-linked workflow.</p></div>')
     active_profile = st.session_state.workspace.patient(selected_patient)

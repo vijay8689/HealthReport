@@ -47,7 +47,7 @@ with st.container(border=True):
     if docs:
         with st.expander("Delete a document and its derived data"):
             chosen = st.selectbox("Document to delete", [d.id for d in docs], format_func=lambda x:next(d.name for d in docs if d.id == x), key=f"delete_doc_{pid}")
-            confirm = st.checkbox("Delete this document, its observations, review history, and patient analysis reports from this demo session.")
+            confirm = st.checkbox("Delete this document, its observations, discharge sections, review history, and patient analysis reports from this demo session.")
             if st.button("Delete selected document", disabled=not confirm, icon=":material/delete:"):
                 ws.remove_document(pid, chosen)
                 st.rerun()
@@ -58,4 +58,3 @@ with st.container(border=True):
             # Patient selection widget is owned by the entry point; set via callback next rerun.
             st.session_state["reset_patient"] = True
             st.rerun()
-

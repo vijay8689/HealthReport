@@ -1,7 +1,10 @@
 """Bounded local parsing and conservative source-linked lab extraction."""
 import hashlib
 import io
+import logging
+import os
 import re
+import shutil
 import zipfile
 from datetime import date, datetime
 from pathlib import Path
@@ -27,14 +30,55 @@ class IntakeError(ValueError):
     """Safe, actionable error that can be displayed to the user."""
 
 
+def tesseract_command() -> str:
+    """Resolve OCR on PATH or in standard Windows installer locations."""
+    configured = os.getenv("TESSERACT_CMD")
+    if configured:
+        if Path(configured).is_file():
+            return configured
+        raise IntakeError("TESSERACT_CMD does not point to a Tesseract executable. Check the configured path.")
+    command = shutil.which("tesseract")
+    if command:
+        return command
+    if os.name == "nt":
+        candidates = [Path(os.getenv("ProgramFiles", "C:/Program Files")) / "Tesseract-OCR/tesseract.exe",
+                      Path(os.getenv("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Tesseract-OCR/tesseract.exe"]
+        local = os.getenv("LOCALAPPDATA")
+        if local:
+            candidates.extend([Path(local) / "Programs/Tesseract-OCR/tesseract.exe",
+                               Path(local) / "Tesseract-OCR/tesseract.exe"])
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+    raise IntakeError("Tesseract OCR is not installed or could not be found. Install it with English language data, or set TESSERACT_CMD to its executable path.")
+
+
 def ocr_image(image) -> str:
     try:
         import pytesseract
-        return pytesseract.image_to_string(image, lang="eng", timeout=20)
+        pytesseract.pytesseract.tesseract_cmd = tesseract_command()
+        from PIL import Image, ImageOps
+        # Phone images may have rotation metadata, transparency, or palette modes.
+        prepared = ImageOps.exif_transpose(image).convert("RGBA")
+        background = Image.new("RGBA", prepared.size, "white")
+        prepared = Image.alpha_composite(background, prepared).convert("RGB")
+        return pytesseract.image_to_string(prepared, lang="eng", timeout=60)
     except ImportError as exc:
         raise IntakeError("OCR is unavailable. Install pytesseract and Tesseract, or upload a text-based report.") from exc
+    except IntakeError:
+        raise
     except Exception as exc:
-        raise IntakeError("OCR could not run. Check that English Tesseract is installed, or use a text-based report.") from exc
+        logging.getLogger(__name__).exception("Local OCR failed")
+        if isinstance(exc, RuntimeError) and "timeout" in str(exc).lower():
+            raise IntakeError("OCR timed out after 60 seconds. Upload a smaller, clear image or split the scanned PDF into smaller files.") from exc
+        if isinstance(exc, pytesseract.TesseractNotFoundError):
+            raise IntakeError("The Tesseract executable could not start. Check TESSERACT_CMD or reinstall the OCR engine.") from exc
+        if isinstance(exc, pytesseract.TesseractError):
+            detail = " ".join(str(exc.message).split())[:500]
+            raise IntakeError(f"Tesseract OCR failed: {detail}") from exc
+        if isinstance(exc, OSError):
+            raise IntakeError(f"OCR could not access the engine or temporary files: {exc.strerror or type(exc).__name__}.") from exc
+        raise IntakeError(f"OCR could not process this image ({type(exc).__name__}). Try a standard PNG/JPEG image or an unlocked PDF.") from exc
 
 
 def parse_bytes(content: bytes, filename: str) -> tuple[list[dict], bool]:

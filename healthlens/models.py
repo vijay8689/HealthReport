@@ -73,3 +73,17 @@ class Revision(BaseModel):
     reason: str
     before: dict
     after: dict
+
+
+class DischargeEntry(BaseModel):
+    text: str
+    locator: str
+
+
+class DischargeSummary(BaseModel):
+    id: str = Field(default_factory=uid)
+    patient_id: str
+    document_id: str
+    sections: dict[str, list[DischargeEntry]]
+    status: Literal["needs_review", "reviewed", "quarantined"] = "needs_review"
+    created_at: str = Field(default_factory=timestamp)

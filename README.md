@@ -18,7 +18,7 @@ Open http://localhost:8501. On Linux/macOS, use `.venv/bin/python` instead. OCR 
 
 ## Working features
 
-- Nine pages: overview, documents, trends, analysis, evidence/review, timeline, reports, connections, settings.
+- Ten pages: overview, documents, discharge summary, trends, analysis, evidence/review, timeline, reports, connections, settings.
 - Three synthetic patient profiles and nine source reports; eight lab markers with dated provenance.
 - Patient switching, custom synthetic profiles, document search, filtering, text preview, source download.
 - PDF/DOCX/TXT parsing and optional PNG/JPEG/scanned PDF OCR; bounded upload sizes and duplicate detection.
@@ -94,3 +94,20 @@ Google Drive OAuth/sync, Supabase authentication/RLS/private storage, Pinecone s
 
 The supplied [full specification](HealthLens_AI_Complete_End_to_End_Code_Generation_Prompt.md) remains the requirements source for later phases. Enterprise visual design is not a claim of production healthcare readiness.
 
+# Discharge summaries
+
+The **Discharge summary** page accepts PDF, PNG, JPG, and JPEG files up to 20 MB.
+It extracts text locally (English Tesseract is required for images and scanned
+PDFs) and organizes explicit headings into patient details, admission/discharge,
+diagnoses, history, allergies, examination, investigations, procedures, hospital
+course, condition at discharge, medications, instructions, follow-up, and warning
+signs. Unrecognized content is preserved, and every extracted line has a source
+location. Medication wording and doses are retained verbatim rather than inferred.
+Discharge records proceed when a patient name is present, even if it differs from
+the selected profile, and are saved under the selected patient. Records without a
+readable patient name are quarantined.
+
+Discharge records are separate from laboratory observations and remain available
+across page navigation in the current session. Like other uploads in this demo,
+they are not saved permanently; download the structured JSON and original file to
+keep a copy. Check extracted content against the original before marking it reviewed.
