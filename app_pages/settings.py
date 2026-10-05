@@ -1,6 +1,7 @@
 import streamlit as st
 
 from healthlens.models import Patient
+from healthlens.supabase import PatientSaveError, save_patient
 from healthlens.workspace import Workspace
 from ui.components import heading, patient_id, workspace
 
@@ -8,7 +9,9 @@ ws, pid = workspace(), patient_id()
 heading("Make the workspace yours.", "Control motion, understand data handling, and manage demonstration records.", "WORKSPACE SETTINGS")
 with st.container(border=True):
     st.subheader("Patient workspaces")
-    st.caption("Create a local patient workspace. This does not create a Supabase login.")
+    st.caption("Save patient details to Supabase and open their workspace. This does not create a Supabase login.")
+    if st.session_state.pop("patient_saved", False):
+        st.success("Patient details saved to Supabase. Workspace added.")
     with st.form("add_patient_workspace"):
         new_patient_id = st.text_input("Patient ID", placeholder="P-0002")
         new_patient_name = st.text_input("Patient name")
@@ -25,24 +28,36 @@ with st.container(border=True):
             st.error("That patient ID already exists.")
         else:
             initials = "".join(part[0] for part in normalized_name.split()[:2]).upper()
-            ws.patients.append(Patient(
+            patient = Patient(
                 id=normalized_id,
                 name=normalized_name,
                 initials=initials or "P",
-                age=new_patient_age or None,
+                age=new_patient_age,
                 sex=new_patient_sex,
-                description="Local patient workspace",
-            ))
-            st.session_state["reset_patient"] = normalized_id
-            st.rerun()
+                description="Cloud patient workspace",
+            )
+            try:
+                try:
+                    secrets = st.secrets.to_dict()
+                except FileNotFoundError:
+                    secrets = {}
+                with st.spinner("Saving patient to Supabase..."):
+                    save_patient(patient, secrets)
+            except PatientSaveError as exc:
+                st.error(str(exc))
+            else:
+                ws.patients.append(patient)
+                st.session_state["patient_saved"] = True
+                st.session_state["reset_patient"] = normalized_id
+                st.rerun()
 with st.container(border=True):
     st.subheader("Appearance & accessibility")
     st.toggle("Reduce floating animations", key="reduce_motion")
     st.caption("Your operating system's reduced-motion preference is also respected automatically.")
 with st.container(border=True):
     st.subheader("Data & privacy")
-    st.write("This release stores synthetic records in the current Streamlit session. Refreshing the browser or restarting the server can reset the workspace. Export anything you want to keep.")
-    st.caption("No documents, prompts, or extracted values are sent to cloud databases or LLM providers. Parser/OCR availability depends on your local installation. This is not a production patient-record system.")
+    st.write("New patient profiles are stored in Supabase and loaded into the patient dropdown when you open the app. Use Refresh patients to fetch newly added profiles. Documents, extracted values, and reports remain in the current Streamlit session.")
+    st.caption("Imported document text is sent to Pinecone's embedding model and stored as vector records when configured. Resetting this demo does not delete Supabase profiles or Pinecone vectors. Original files and derived analysis reports remain session-local.")
     docs = ws.docs(pid)
     if docs:
         with st.expander("Delete a document and its derived data"):

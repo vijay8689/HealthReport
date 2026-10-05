@@ -1,5 +1,6 @@
 import streamlit as st
 from healthlens.ingestion import IntakeError, ingest
+from ui.pinecone_sync import sync_document
 from ui.components import doc_rows, heading, panel_title, patient_id, workspace
 
 ws, pid = workspace(), patient_id()
@@ -11,7 +12,7 @@ if tab == "Upload reports":
     with left:
         with st.container(border=True):
             panel_title("Bring your records together", "PDF, DOCX, TXT, PNG or JPG · up to 20 MB per file")
-            st.caption("Files stay in this local browser session and are not sent to an AI provider. Use only reports you are authorized to process.")
+            st.caption("Original files stay in this session. When Pinecone is configured, extracted text is sent to its embedding model and stored as vector records. Use only reports you are authorized to process.")
             with st.form(f"upload_{pid}"):
                 uploads = st.file_uploader("Choose reports", type=["pdf", "docx", "txt", "png", "jpg", "jpeg"], accept_multiple_files=True)
                 st.write(f"Import into **{ws.patient(pid).name} · {pid}**")
@@ -41,6 +42,7 @@ if tab == "Upload reports":
                                     st.warning(f"{doc.name}: quarantined. " + " ".join(doc.warnings))
                                 else:
                                     st.success(f"{doc.name}: {len(extracted)} observations saved and available across the workspace.")
+                                    sync_document(doc)
                                     for warning in doc.warnings:
                                         st.info(warning)
                             else:
@@ -70,6 +72,11 @@ else:
     with st.expander("Add a report", expanded=not docs):
         st.caption("Use the Upload reports tab above to import a synthetic document.")
     if docs:
+        eligible = [d for d in docs if d.status != "Quarantined"]
+        if st.button("Sync documents to Pinecone", disabled=not eligible, icon=":material/cloud_upload:"):
+            for document in eligible:
+                sync_document(document)
+        st.caption("Sync saves extracted text chunks in the selected patient's Pinecone namespace. Repeated syncs reuse the same chunk IDs. Deleting or resetting local documents does not delete cloud vectors.")
         selected = st.selectbox("Preview source document", [d.id for d in docs], format_func=lambda x:next(d.name for d in docs if d.id == x))
         doc = next(d for d in docs if d.id == selected)
         for warning in doc.warnings:
@@ -78,5 +85,7 @@ else:
             with st.expander(page["locator"], expanded=len(doc.pages) == 1):
                 st.code(page["text"], language=None, wrap_lines=True)
         st.caption(f"SHA-256: {doc.hash} · Version {doc.version}")
+        has_original = doc.id in ws.originals
         data = ws.originals.get(doc.id, "\n".join(p["text"] for p in doc.pages).encode())
-        st.download_button("Download source", data, doc.name, icon=":material/download:")
+        st.download_button("Download source" if has_original else "Download restored source text", data,
+                           doc.name if has_original else doc.name + ".txt", icon=":material/download:")

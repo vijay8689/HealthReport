@@ -2,6 +2,7 @@ import streamlit as st
 
 from healthlens.discharge import ingest_discharge
 from healthlens.ingestion import IntakeError
+from ui.pinecone_sync import sync_document
 from ui.components import heading, panel_title, patient_id, workspace
 
 ws, pid = workspace(), patient_id()
@@ -29,6 +30,7 @@ with st.container(border=True):
                     st.warning("Saved in quarantine. No readable patient name was found in the document.")
                 else:
                     st.success("Discharge summary saved in separate sections. Check the extracted details against the source.")
+                    sync_document(document)
             except IntakeError as error:
                 st.error(str(error))
 
@@ -65,5 +67,9 @@ else:
         st.rerun()
     st.download_button("Download structured discharge data", summary.model_dump_json(indent=2),
                        f"discharge-{summary.id}.json", mime="application/json", key=f"discharge_json_{summary.id}")
-    st.download_button("Download original document", ws.originals[document.id], document.name,
-                       key=f"discharge_original_{summary.id}")
+    if document.id in ws.originals:
+        st.download_button("Download original document", ws.originals[document.id], document.name,
+                           key=f"discharge_original_{summary.id}")
+    else:
+        st.download_button("Download restored source text", "\n".join(p["text"] for p in document.pages),
+                           document.name + ".txt", key=f"discharge_original_{summary.id}")

@@ -11,7 +11,7 @@ Use `requirements-dev.txt` for pytest. Core tests do not require network access,
 1. Push application files to a repository, excluding `.venv`, secrets, runtime artifacts, and patient data.
 2. Select `app.py` as the entry point and Python 3.13.
 3. Let Cloud install `requirements.txt`; `packages.txt` requests English Tesseract.
-4. No application secrets are needed for the demo.
+4. To add patient workspaces, configure `SUPABASE_URL` and `SUPABASE_KEY` in app secrets and run `docs/supabase.sql` in the Supabase SQL editor. Existing demo pages work without credentials.
 5. Verify overview, patient switching, sample import/review, analysis, and PDF download.
 
 Cloud deployment remains unverified until performed against a real account. Demo sessions are ephemeral. Do not use this deployment for real patient records.

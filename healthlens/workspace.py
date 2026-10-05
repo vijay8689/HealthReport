@@ -63,6 +63,37 @@ class Workspace:
     def patient(self, patient_id):
         return next(p for p in self.patients if p.id == patient_id)
 
+    def restore_cloud_records(self, patient_id, records):
+        """Merge a validated cloud snapshot without replacing local imports/reviews."""
+        if any(d.patient_id != patient_id or any(o.patient_id != patient_id or o.document_id != d.id for o in obs)
+               or (summary is not None and (summary.patient_id != patient_id or summary.document_id != d.id))
+               for d, obs, summary in records):
+            raise ValueError("Cloud records do not belong to the selected patient.")
+        known = {(d.hash, d.kind) for d in self.docs(patient_id)}
+        new_ids = [d.id for d, _, _ in records if (d.hash, d.kind) not in known]
+        if len(new_ids) != len(set(new_ids)) or any(d.id in new_ids for d in self.documents):
+            raise ValueError("Cloud document ID conflicts with existing evidence.")
+        changed = False
+        for document, observations, summary in records:
+            identity = (document.hash, document.kind)
+            if identity in known:
+                previous = next(d for d in self.docs(patient_id) if (d.hash, d.kind) == identity)
+                old_observations = [o for o in self.obs(patient_id) if o.document_id == previous.id]
+                if previous.source != "Pinecone" or (previous.model_dump() == document.model_dump()
+                        and [o.model_dump() for o in old_observations] == [o.model_dump() for o in observations]):
+                    continue
+                if any(r.observation_id in {o.id for o in old_observations} for r in self.revisions):
+                    continue
+                self.remove_document(patient_id, previous.id)
+            self.documents.append(document)
+            self.observations.extend(observations)
+            if summary is not None:
+                self.discharge_summaries.append(summary)
+            known.add(identity)
+            changed = True
+        if changed:
+            self.refresh_analysis(patient_id)
+
     def docs(self, patient_id) -> list[Document]:
         return sorted([d for d in self.documents if d.patient_id == patient_id],
                       key=lambda d: str(d.date or ""), reverse=True)

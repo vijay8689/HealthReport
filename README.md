@@ -2,9 +2,25 @@
 
 An animated Streamlit workspace for exploring clinical documents, laboratory trends, evidence, and orchestrated summaries. Midnight-blue navigation, mint accents, a floating orbital hero, responsive cards, and reduced-motion support.
 
-**This release is a working synthetic-data demo/MVP, not the entire connected production system described in the specification.** It makes no external AI calls and requires no API keys. It does not provide diagnosis, treatment recommendations, or clinical risk predictions.
+**This release is a working demo/MVP, not the entire connected production system described in the specification.** It makes no external AI calls. Adding patient workspaces requires Supabase configuration. It does not provide diagnosis, treatment recommendations, or clinical risk predictions.
+
+## Save new patient profiles to Supabase
+
+1. Run [docs/supabase.sql](docs/supabase.sql) in your project's Supabase SQL editor.
+2. Copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and set `SUPABASE_URL` and `SUPABASE_KEY`. Use a server-only `sb_secret_...` key or legacy `service_role` key. Environment variables with these names also work and take precedence. On Streamlit Cloud, set these values in app secrets. Never commit the real key.
+3. Open **Settings**, enter patient details, and click **Add patient workspace**. The profile is inserted into `public.patients` through the Supabase REST API before the workspace is added. Failed saves leave the form available for correction; duplicate IDs never overwrite existing patients.
+
+Patient profiles persist in Supabase and load into the active patient dropdown on app startup. The list refreshes on interactions after 60 seconds; **Refresh patients** fetches immediately. Cloud and session profiles are merged by patient ID. This flow does not create authentication users. Documents, reports, and extracted values remain session-local. Demo reset does not delete cloud profiles. The app has no user authentication or tenant isolation; restrict access to the server. The supplied table has RLS enabled and no public access policies. Existing installations should run `grant select, insert on public.patients to service_role;` in the SQL editor if SELECT access is missing.
 
 ## Run locally
+
+### Pinecone cloud connection
+
+Selecting a patient loads all records from `patient-<Patient ID>` into the session workspace before rendering any patient section. **Refresh patient records** retries immediately; otherwise records refresh on interactions after 60 seconds. Source text, typed laboratory observations, and discharge sections populate Documents, Lab trends, AI analysis, Evidence & review, Timeline, and Reports. Analysis is regenerated from restored observations. Original binary files are not stored in Pinecone; restored downloads contain source text. Older text-only vectors use the existing parser as a fallback; re-sync original reports to preserve PDF table values, dates, and exact provenance. Patient metadata is validated against the selected namespace. Local imports and reviewed session observations are preserved during cloud refreshes.
+
+Set `PINECONE_API_KEY` and `PINECONE_INDEX_NAME` in `.streamlit/secrets.toml` or server environment variables. Use an API key from the same Pinecone project as the index. Open **Connections → Test Pinecone connection**. The app verifies index readiness and reads vector statistics before showing **Available**. Checks are retained per session for 60 seconds. `PINECONE_ENVIRONMENT` is not needed: the index host is discovered automatically.
+
+Non-quarantined report and discharge uploads automatically sync extracted text to an index with integrated embeddings. Existing session documents can be synced with **Documents → Library → Sync documents to Pinecone**. Text is divided into 1,200-character chunks with 200-character overlap; batches contain up to 96 records. The index's embedding field mapping is discovered automatically. Patient records use namespace `patient-<Patient ID>` and stable chunk IDs for safe retries. Success is shown only after all upserts are acknowledged. Pinecone can take a short time to update vector counts. Inspect the patient's namespace in the Pinecone console. Document deletion and demo reset affect the local session only; cloud vectors remain. Semantic search is not yet enabled.
 
 Tested with Python 3.13 and Streamlit 1.59.2.
 

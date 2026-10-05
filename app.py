@@ -1,9 +1,12 @@
 """Streamlit entry point. Run: python -m streamlit run app.py."""
 import os
+import time
 
 import streamlit as st
 
 from healthlens.workspace import Workspace
+from healthlens.supabase import PatientSaveError, list_patients
+from healthlens.pinecone_db import PineconeConnectionError, load_patient_records
 from ui.components import e, footer, html, load_styles, topbar
 
 st.set_page_config(page_title="HealthLens AI · Clinical intelligence", page_icon=":material/ecg_heart:", layout="wide", initial_sidebar_state="expanded")
@@ -15,6 +18,31 @@ if os.getenv("APP_MODE", "demo") != "demo":
 st.session_state.workspace = Workspace.from_session(st.session_state.get("workspace"))
 st.session_state.workspace.ensure_demo_records()
 st.session_state.workspace.activate_pending_uploads()
+try:
+    cloud_secrets = st.secrets.to_dict()
+except FileNotFoundError:
+    cloud_secrets = {}
+cloud_configured = bool((os.getenv("SUPABASE_URL") or cloud_secrets.get("SUPABASE_URL"))
+                        and (os.getenv("SUPABASE_KEY") or cloud_secrets.get("SUPABASE_KEY")))
+if not cloud_configured:
+    st.session_state["supabase_available"] = False
+# Keep patient data and refresh timing isolated to this browser session.
+if cloud_configured and (time.monotonic() - st.session_state.get("patients_loaded_at", 0) >= 60
+                         or st.session_state.pop("refresh_cloud_patients", False)):
+    try:
+        cloud_patients = list_patients(cloud_secrets)
+    except PatientSaveError as exc:
+        st.session_state["supabase_available"] = False
+        st.session_state["patients_load_error"] = str(exc)
+    else:
+        st.session_state["supabase_available"] = True
+        by_id = {p.id: p for p in st.session_state.workspace.patients}
+        by_id.update({p.id: p for p in cloud_patients})
+        st.session_state.workspace.patients = list(by_id.values())
+        st.session_state.pop("patients_load_error", None)
+    st.session_state["patients_loaded_at"] = time.monotonic()
+if cloud_configured and st.session_state.get("patients_load_error"):
+    st.warning(st.session_state["patients_load_error"])
 if not st.session_state.workspace.patients:
     st.info("No patient records are available. Import or connect a patient workspace to begin.")
     st.stop()
@@ -73,8 +101,29 @@ left, right = st.columns([2.4, 1], vertical_alignment="center")
 with left:
     html('<div class="eyebrow">CLINICAL DOCUMENT INTELLIGENCE</div>')
 with right:
+    if cloud_configured:
+        st.button("Refresh patients", icon=":material/refresh:",
+                  on_click=lambda: st.session_state.__setitem__("refresh_cloud_patients", True))
     patients = st.session_state.workspace.patients
     ids = [p.id for p in patients]
     selected = st.selectbox("Active patient", ids, format_func=lambda pid: next(p.name + " · " + pid for p in patients if p.id == pid), key="patient_id", label_visibility="collapsed")
+pinecone_configured = bool((os.getenv("PINECONE_API_KEY") or cloud_secrets.get("PINECONE_API_KEY"))
+                           and (os.getenv("PINECONE_INDEX_NAME") or cloud_secrets.get("PINECONE_INDEX_NAME")))
+if pinecone_configured:
+    refresh_records = st.button("Refresh patient records", icon=":material/cloud_download:")
+    loaded_at = st.session_state.setdefault("pinecone_patient_loaded_at", {})
+    errors = st.session_state.setdefault("pinecone_patient_errors", {})
+    if refresh_records or time.monotonic() - loaded_at.get(selected, 0) >= 60:
+        try:
+            with st.spinner("Loading selected patient's Pinecone records..."):
+                records = load_patient_records(selected, cloud_secrets)
+                st.session_state.workspace.restore_cloud_records(selected, records)
+        except (PineconeConnectionError, ValueError) as exc:
+            errors[selected] = str(exc)
+        else:
+            errors.pop(selected, None)
+        loaded_at[selected] = time.monotonic()
+    if selected in errors:
+        st.warning(errors[selected])
 nav.run()
 footer()

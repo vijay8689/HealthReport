@@ -1,6 +1,6 @@
 # Demo security boundaries
 
-This application is for synthetic demonstration data only. No authentication, tenant database, cloud storage, token vault, durable queue, or real patient-data production deployment is provided.
+This application has no user authentication or tenant isolation. Newly added patient profiles are inserted into Supabase using a server-only API key; documents and derived data remain session-local. No token vault, durable queue, or real patient-data production deployment is provided. Restrict access to the Streamlit server because its trusted key permits inserts for every app visitor. See README.md for Supabase configuration.
 
 The session repository is isolated by Streamlit browser session; it is not an authorization mechanism suitable for healthcare records. There are no externally callable data endpoints beyond Streamlit's normal session transport. Do not disable Streamlit's XSRF or CORS protection.
 
