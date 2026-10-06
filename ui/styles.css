@@ -2,6 +2,7 @@
 :root { --ink:#182c3b; --muted:#697d8c; --mint:#0c9b8b; }
 .stApp { background: #f5f7fa; }
 header[data-testid="stHeader"] { background:transparent; height:2rem; }
+[data-testid="stToolbarActions"] { display:none !important; }
 .stMainBlockContainer { max-width:1560px; padding:2rem 2.8rem 2rem; }
 [data-testid="stSidebar"] { min-width:255px; max-width:255px; border-right:0; }
 [data-testid="stSidebarContent"] { background:radial-gradient(ellipse at 0 100%,#193d45 0,transparent 46%),#101f2e; }
