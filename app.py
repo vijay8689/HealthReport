@@ -7,6 +7,8 @@ import streamlit as st
 from healthlens.workspace import Workspace
 from healthlens.supabase import PatientSaveError, list_patients
 from healthlens.pinecone_db import PineconeConnectionError, load_patient_records
+from healthlens.auth import user_id
+from ui.auth import clear_session, logout, require_login
 from ui.components import e, footer, html, load_styles, topbar
 
 st.set_page_config(page_title="HealthLens AI · Clinical intelligence", page_icon=":material/ecg_heart:", layout="wide", initial_sidebar_state="expanded")
@@ -15,36 +17,49 @@ if os.getenv("APP_MODE", "demo") != "demo":
     st.error("This release supports synthetic demo mode only. Connected patient-data deployment is not enabled.")
     st.stop()
 
-st.session_state.workspace = Workspace.from_session(st.session_state.get("workspace"))
-st.session_state.workspace.ensure_demo_records()
-st.session_state.workspace.activate_pending_uploads()
 try:
     cloud_secrets = st.secrets.to_dict()
 except FileNotFoundError:
     cloud_secrets = {}
-cloud_configured = bool((os.getenv("SUPABASE_URL") or cloud_secrets.get("SUPABASE_URL"))
-                        and (os.getenv("SUPABASE_KEY") or cloud_secrets.get("SUPABASE_KEY")))
-if not cloud_configured:
-    st.session_state["supabase_available"] = False
+session = require_login(cloud_secrets)
+owner_id = user_id(session) if session else "guest"
+if st.session_state.get("workspace_owner_id") != owner_id:
+    clear_session()
+    if session:
+        st.session_state.auth_session = session
+    st.session_state.workspace_owner_id = owner_id
+    st.session_state.workspace = Workspace.empty() if session else Workspace()
+st.session_state.workspace = Workspace.from_session(st.session_state.get("workspace") or Workspace.empty())
+st.session_state.workspace.activate_pending_uploads()
+if session:
+    with st.sidebar:
+        st.caption("Signed in as " + session["user"].get("email", "your account"))
+        st.button("Sign out", on_click=logout, args=(cloud_secrets,))
+cloud_configured = bool(session)
 # Keep patient data and refresh timing isolated to this browser session.
 if cloud_configured and (time.monotonic() - st.session_state.get("patients_loaded_at", 0) >= 60
                          or st.session_state.pop("refresh_cloud_patients", False)):
     try:
-        cloud_patients = list_patients(cloud_secrets)
+        cloud_patients = list_patients(cloud_secrets, session=session)
     except PatientSaveError as exc:
         st.session_state["supabase_available"] = False
         st.session_state["patients_load_error"] = str(exc)
     else:
         st.session_state["supabase_available"] = True
-        by_id = {p.id: p for p in st.session_state.workspace.patients}
-        by_id.update({p.id: p for p in cloud_patients})
-        st.session_state.workspace.patients = list(by_id.values())
+        allowed = {p.id for p in cloud_patients}
+        for profile in list(st.session_state.workspace.patients):
+            if profile.id not in allowed:
+                for document in list(st.session_state.workspace.docs(profile.id)):
+                    st.session_state.workspace.remove_document(profile.id, document.id)
+        st.session_state.workspace.patients = cloud_patients
         st.session_state.pop("patients_load_error", None)
     st.session_state["patients_loaded_at"] = time.monotonic()
 if cloud_configured and st.session_state.get("patients_load_error"):
     st.warning(st.session_state["patients_load_error"])
 if not st.session_state.workspace.patients:
-    st.info("No patient records are available. Import or connect a patient workspace to begin.")
+    st.info("Add your first patient to begin. Your patient list is private to your account.")
+    from ui.patient_form import add_patient_form
+    add_patient_form(st.session_state.workspace, cloud_secrets, session)
     st.stop()
 patient_ids = {patient.id for patient in st.session_state.workspace.patients}
 requested_patient = st.session_state.pop("pending_patient_id", None)
@@ -109,14 +124,14 @@ with right:
     selected = st.selectbox("Active patient", ids, format_func=lambda pid: next(p.name + " · " + pid for p in patients if p.id == pid), key="patient_id", label_visibility="collapsed")
 pinecone_configured = bool((os.getenv("PINECONE_API_KEY") or cloud_secrets.get("PINECONE_API_KEY"))
                            and (os.getenv("PINECONE_INDEX_NAME") or cloud_secrets.get("PINECONE_INDEX_NAME")))
-if pinecone_configured:
+if session and pinecone_configured:
     refresh_records = st.button("Refresh patient records", icon=":material/cloud_download:")
     loaded_at = st.session_state.setdefault("pinecone_patient_loaded_at", {})
     errors = st.session_state.setdefault("pinecone_patient_errors", {})
     if refresh_records or time.monotonic() - loaded_at.get(selected, 0) >= 60:
         try:
             with st.spinner("Loading selected patient's Pinecone records..."):
-                records = load_patient_records(selected, cloud_secrets)
+                records = load_patient_records(selected, cloud_secrets, session=session)
                 st.session_state.workspace.restore_cloud_records(selected, records)
         except (PineconeConnectionError, ValueError) as exc:
             errors[selected] = str(exc)

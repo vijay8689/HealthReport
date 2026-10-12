@@ -76,7 +76,7 @@ else:
         if st.button("Sync documents to Pinecone", disabled=not eligible, icon=":material/cloud_upload:"):
             for document in eligible:
                 sync_document(document)
-        st.caption("Sync saves extracted text chunks in the selected patient's Pinecone namespace. Repeated syncs reuse the same chunk IDs. Deleting or resetting local documents does not delete cloud vectors.")
+        st.caption("Sync saves extracted text chunks in the selected patient's private Pinecone namespace. Repeated syncs reuse the same chunk IDs. Deleting or resetting local documents does not delete cloud vectors.")
         selected = st.selectbox("Preview source document", [d.id for d in docs], format_func=lambda x:next(d.name for d in docs if d.id == x))
         doc = next(d for d in docs if d.id == selected)
         for warning in doc.warnings:

@@ -7,6 +7,9 @@ from urllib.parse import quote, urlencode
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from healthlens.auth import user_id
+from healthlens.supabase import PatientSaveError, require_patient_access
+
 
 class PineconeConnectionError(Exception):
     """Connection failure safe to display without credentials."""
@@ -70,10 +73,11 @@ def document_chunks(document):
     return records
 
 
-def index_document(document, secrets=None, observations=None):
+def index_document(document, secrets=None, observations=None, *, session=None):
     """Embed and upsert source text into the selected patient's namespace."""
     if document.status == "Quarantined":
         raise PineconeConnectionError("Quarantined documents cannot be indexed in Pinecone.")
+    namespace = authorized_namespace(document.patient_id, secrets, session)
     records = document_chunks(document)
     if not records:
         raise PineconeConnectionError("No readable text is available to index.")
@@ -92,12 +96,13 @@ def index_document(document, secrets=None, observations=None):
                         "patient_id": document.patient_id, "document_id": document.id,
                         "source_hash": document.hash, "kind": document.kind,
                         "observation_json": observation.model_dump_json()})
+    for record in records:
+        record["owner_id"] = user_id(session)
     info = check_connection(secrets)
     field = info["field_map"].get("text")
     if not info["model"] or not isinstance(field, str) or not field:
         raise PineconeConnectionError("This index needs integrated text embeddings with a text field mapping.")
     key = str(os.getenv("PINECONE_API_KEY") or (secrets or {}).get("PINECONE_API_KEY", "")).strip()
-    namespace = "patient-" + document.patient_id
     headers = {"Api-Key": key, "X-Pinecone-Api-Version": "2025-10", "Content-Type": "application/x-ndjson"}
     endpoint = f"https://{info['host']}/records/namespaces/{quote(namespace, safe='')}/upsert"
     try:
@@ -119,13 +124,13 @@ def index_document(document, secrets=None, observations=None):
     return {"chunk_count": chunk_count, "namespace": namespace}
 
 
-def load_patient_records(patient_id, secrets=None):
-    """List and fetch the complete selected namespace, never similarity top-k."""
+def load_patient_records(patient_id, secrets=None, *, session=None):
+    """Read only an authorized user/patient namespace; never legacy shared namespaces."""
+    namespace = authorized_namespace(patient_id, secrets, session)
     info = check_connection(secrets)
     key = str(os.getenv("PINECONE_API_KEY") or (secrets or {}).get("PINECONE_API_KEY", "")).strip()
     headers = {"Api-Key": key, "X-Pinecone-Api-Version": "2025-10"}
     base = "https://" + info["host"]
-    namespace = "patient-" + patient_id
     records, token, seen = [], None, set()
     try:
         while True:
@@ -143,7 +148,7 @@ def load_patient_records(patient_id, secrets=None):
                     raise PineconeConnectionError("Some Pinecone records are not yet readable. Retry Refresh patient records shortly.")
                 for vector in fetched.values():
                     record = vector.get("metadata", {})
-                    if record.get("patient_id") != patient_id:
+                    if record.get("patient_id") != patient_id or record.get("owner_id") != user_id(session):
                         raise PineconeConnectionError("Pinecone record patient metadata does not match the selected patient. No cloud records loaded.")
                     records.append(record)
             token = listing.get("pagination", {}).get("next")
@@ -222,3 +227,16 @@ def restore_documents(patient_id, records, text_field):
             document.status = "Imported"
         restored.append((document, observations, summary))
     return restored
+
+
+def patient_namespace(owner_id, patient_id):
+    digest = hashlib.sha256(patient_id.encode()).hexdigest()
+    return "user-" + owner_id + "-patient-" + digest
+
+
+def authorized_namespace(patient_id, secrets, session):
+    try:
+        require_patient_access(patient_id, secrets, session=session)
+    except PatientSaveError as exc:
+        raise PineconeConnectionError(str(exc)) from None
+    return patient_namespace(user_id(session), patient_id)

@@ -19,6 +19,19 @@ class Workspace:
         self.ensure_demo_records()
 
     @classmethod
+    def empty(cls):
+        """Private accounts start without bundled or previous-session patient records."""
+        workspace = cls.__new__(cls)
+        workspace.patients = []
+        workspace.documents = []
+        workspace.observations = []
+        workspace.revisions = []
+        workspace.reports = []
+        workspace.originals = {}
+        workspace.discharge_summaries = []
+        return workspace
+
+    @classmethod
     def from_session(cls, existing):
         """Upgrade session objects retained from an earlier app version in place."""
         if existing is None:

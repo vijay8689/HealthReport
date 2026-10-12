@@ -11,8 +11,8 @@ Use `requirements-dev.txt` for pytest. Core tests do not require network access,
 1. Push application files to a repository, excluding `.venv`, secrets, runtime artifacts, and patient data.
 2. Select `app.py` as the entry point and Python 3.13.
 3. Let Cloud install `requirements.txt`; `packages.txt` requests English Tesseract.
-4. To add patient workspaces, configure `SUPABASE_URL` and `SUPABASE_KEY` in app secrets and run `docs/supabase.sql` in the Supabase SQL editor. Existing demo pages work without credentials.
-5. Verify overview, patient switching, sample import/review, analysis, and PDF download.
+4. Configure `SUPABASE_URL` and `SUPABASE_ANON_KEY` (publishable or legacy anon key) in app secrets and run `docs/supabase.sql` in the Supabase SQL editor. Enable Supabase email/password sign-up and set the Auth Site URL. Login is required for private patient records. Guests can browse bundled dummy data without credentials.
+5. Create two test accounts. Confirm each can add patients, see only their own profiles and reports, and cannot access another owner's patient even with the same patient ID. Verify sign-out clears private state, then test upload, analysis, and downloads.
 
 Cloud deployment remains unverified until performed against a real account. Demo sessions are ephemeral. Do not use this deployment for real patient records.
 
@@ -33,5 +33,9 @@ Cloud deployment remains unverified until performed against a real account. Demo
 
 ## Production phases still required
 
-Application authentication, Supabase schema/RLS and private storage, durable checkpoints/workers, real Google OAuth callback and token vault, Pinecone index lifecycle, provider-backed LLM/RAG, process isolation, evaluation thresholds, retention/deletion reconciliation, and live integration verification are not in this release. Refer to the specification rather than treating the visual demo as complete production implementation.
+Supabase authentication and patient schema/RLS policies are implemented and require live verification. Private original-file storage, durable checkpoints/workers, real Google OAuth callback and token vault, Pinecone index lifecycle, provider-backed LLM/RAG, process isolation, evaluation thresholds, retention/deletion reconciliation, and live integration verification are not in this release. Refer to the specification rather than treating the visual demo as complete production implementation.
 
+
+## Existing patient migration
+
+The SQL migration preserves historical profiles with NULL ownership; regular accounts cannot see them. Verify the correct owner for each record before assigning `owner_id` using its `row_id`. Legacy shared Pinecone vectors are not loaded; re-upload the original reports in the verified owner's account. See README.md for full setup.

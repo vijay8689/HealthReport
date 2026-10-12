@@ -8,7 +8,8 @@ from healthlens.pinecone_db import PineconeConnectionError, check_connection
 from healthlens.pinecone_db import document_chunks, index_document
 from healthlens.models import Document
 from healthlens.models import Observation, Patient
-from healthlens.pinecone_db import restore_documents, load_patient_records
+from healthlens.pinecone_db import restore_documents, load_patient_records, patient_namespace
+from conftest import auth_session, OWNER
 
 
 def test_connection_checks_index_and_data_plane(monkeypatch):
@@ -51,11 +52,11 @@ def test_index_document_uses_mapped_text_and_patient_namespace(monkeypatch):
     info = {"host": "test.svc.pinecone.io", "model": "llama-text-embed-v2", "field_map": {"text": "content"}}
     response = MagicMock()
     response.__enter__.return_value.status = 201
-    with patch("healthlens.pinecone_db.check_connection", return_value=info), patch("healthlens.pinecone_db.urlopen", return_value=response) as post:
-        result = index_document(doc)
-    assert result == {"chunk_count": 1, "namespace": "patient-P-1"}
+    with patch("healthlens.pinecone_db.require_patient_access"), patch("healthlens.pinecone_db.check_connection", return_value=info), patch("healthlens.pinecone_db.urlopen", return_value=response) as post:
+        result = index_document(doc, session=auth_session())
+    assert result == {"chunk_count": 1, "namespace": patient_namespace(OWNER, "P-1")}
     request = post.call_args.args[0]
-    assert request.full_url.endswith("/records/namespaces/patient-P-1/upsert")
+    assert request.full_url.endswith("/records/namespaces/" + patient_namespace(OWNER, "P-1") + "/upsert")
     record = json.loads(request.data)
     assert record["content"] == "Source text"
     assert record["patient_id"] == "P-1"
@@ -99,6 +100,7 @@ def test_restore_preserves_values_and_patient_scope():
         restore_documents("C-1", records[:-1], "chunk_text")
 
 
+@pytest.mark.usefixtures("signed_in_demo")
 def test_patient_selection_restores_all_sections_without_cross_patient_data(monkeypatch):
     from streamlit.testing.v1 import AppTest
     monkeypatch.setenv("PINECONE_API_KEY", "test")
@@ -106,9 +108,9 @@ def test_patient_selection_restores_all_sections_without_cross_patient_data(monk
     monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("SUPABASE_KEY", "test")
     records = restore_documents("C-1", cloud_fixture(), "chunk_text")
-    def load(pid, secrets):
+    def load(pid, secrets, *, session=None):
         return records if pid == "C-1" else []
-    with patch("healthlens.supabase.list_patients", return_value=[Patient(id="C-1", name="Cloud Patient", initials="CP")]), patch("healthlens.pinecone_db.load_patient_records", side_effect=load):
+    with patch("healthlens.supabase.list_patients", return_value=[Patient(id="C-1", name="Cloud Patient", initials="CP"), Patient(id="C-2", name="Other owned patient", initials="OP")]), patch("healthlens.pinecone_db.load_patient_records", side_effect=load):
         app = AppTest.from_file("app.py", default_timeout=30).run()
         app.selectbox(key="patient_id").select("C-1").run()
         assert not app.exception
@@ -116,13 +118,15 @@ def test_patient_selection_restores_all_sections_without_cross_patient_data(monk
         for page in ["trends", "analysis", "evidence", "timeline", "reports", "documents"]:
             app.switch_page(f"app_pages/{page}.py").run()
             assert not app.exception, page
-        app.selectbox(key="patient_id").select("DUMMY-0001").run()
-        assert all(o.patient_id == "DUMMY-0001" for o in app.session_state.workspace.obs("DUMMY-0001"))
+        app.selectbox(key="patient_id").select("C-2").run()
+        assert not app.session_state.workspace.obs("C-2")
 
 
 def test_loader_fetches_only_selected_namespace(monkeypatch):
     monkeypatch.setenv("PINECONE_API_KEY", "test")
     records = cloud_fixture()
+    for record in records:
+        record["owner_id"] = OWNER
     listing = {"vectors": [{"id": str(i)} for i in range(len(records))]}
     fetched = {"vectors": {str(i): {"metadata": record} for i, record in enumerate(records)}}
     responses = []
@@ -130,7 +134,7 @@ def test_loader_fetches_only_selected_namespace(monkeypatch):
         response = MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps(payload).encode()
         responses.append(response)
-    with patch("healthlens.pinecone_db.check_connection", return_value={"host": "test.svc.pinecone.io", "field_map": {"text": "chunk_text"}}), patch("healthlens.pinecone_db.urlopen", side_effect=responses) as get:
-        restored = load_patient_records("C-1")
+    with patch("healthlens.pinecone_db.require_patient_access"), patch("healthlens.pinecone_db.check_connection", return_value={"host": "test.svc.pinecone.io", "field_map": {"text": "chunk_text"}}), patch("healthlens.pinecone_db.urlopen", side_effect=responses) as get:
+        restored = load_patient_records("C-1", session=auth_session())
     assert restored[0][0].patient_id == "C-1"
-    assert all("namespace=patient-C-1" in call.args[0].full_url for call in get.call_args_list)
+    assert all("namespace=" + patient_namespace(OWNER, "C-1") in call.args[0].full_url for call in get.call_args_list)

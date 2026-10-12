@@ -1,3 +1,7 @@
+import pytest
+
+pytestmark = pytest.mark.usefixtures("signed_in_demo")
+
 from streamlit.testing.v1 import AppTest
 
 
