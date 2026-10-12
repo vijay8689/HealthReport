@@ -416,3 +416,36 @@ def test_resend_ui_handles_provider_rate_limit():
         next(b for b in app.button if b.label == "Resend confirmation email").click().run()
     assert not app.exception
     assert any("Too many emails" in e.value for e in app.error)
+
+
+def test_signin_with_older_workspace_without_empty_method(monkeypatch):
+    monkeypatch.delattr(Workspace, "empty")
+    with patch("healthlens.supabase.list_patients", return_value=[]):
+        app = logged_in_app().run()
+    assert not app.exception
+    workspace = app.session_state.workspace
+    assert workspace.patients == []
+    assert workspace.documents == []
+    assert workspace.observations == []
+    assert workspace.revisions == []
+    assert workspace.reports == []
+    assert workspace.originals == {}
+    assert workspace.discharge_summaries == []
+    assert any(b.label == "Add patient workspace" for b in app.button)
+
+
+def test_clear_private_workspace_with_older_workspace_without_empty_method(monkeypatch):
+    monkeypatch.delattr(Workspace, "empty")
+    patient = Patient(id="P-1", name="Private Patient", initials="PP")
+    with patch("healthlens.supabase.list_patients", return_value=[patient]):
+        app = logged_in_app().run()
+        app.session_state.workspace.originals["old-report"] = b"private report"
+        app.switch_page("app_pages/settings.py").run()
+        next(c for c in app.checkbox if c.label.startswith("Remove your session imports")).check().run()
+        next(b for b in app.button if b.label == "Clear session data").click().run()
+    assert not app.exception
+    workspace = app.session_state.workspace
+    assert [p.id for p in workspace.patients] == ["P-1"]
+    assert not workspace.documents
+    assert not workspace.originals
+    assert not workspace.reports

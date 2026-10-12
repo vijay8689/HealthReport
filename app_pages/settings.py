@@ -1,6 +1,5 @@
 import streamlit as st
 
-from healthlens.workspace import Workspace
 from ui.components import heading, patient_id, workspace
 from ui.patient_form import add_patient_form
 
@@ -32,7 +31,8 @@ with st.container(border=True):
     with st.expander("Clear session workspace"):
         confirm_reset = st.checkbox("Remove your session imports and reports. Saved patient profiles and cloud records remain.")
         if st.button("Clear session data", disabled=not confirm_reset, icon=":material/restart_alt:"):
-            st.session_state.workspace = Workspace.empty() if st.session_state.get("auth_session") else Workspace()
+            # The entry point recreates the appropriate guest/private workspace.
+            st.session_state.workspace = None
             # Patient selection widget is owned by the entry point; set via callback next rerun.
             st.session_state.pop("patients_loaded_at", None)
             st.session_state["reset_patient"] = True

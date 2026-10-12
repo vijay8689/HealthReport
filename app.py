@@ -11,6 +11,22 @@ from healthlens.auth import user_id
 from ui.auth import clear_session, logout, require_login
 from ui.components import e, footer, html, load_styles, topbar
 
+def new_workspace(*, demo):
+    """Initialize safely even when an older Workspace class is loaded on Cloud."""
+    workspace = Workspace()
+    if not demo:
+        # Clear every patient-data collection before exposing the private workspace.
+        # Do not depend on Workspace.empty(), introduced in a newer module version.
+        workspace.patients = []
+        workspace.documents = []
+        workspace.observations = []
+        workspace.revisions = []
+        workspace.reports = []
+        workspace.originals = {}
+        workspace.discharge_summaries = []
+    return workspace
+
+
 st.set_page_config(page_title="HealthLens AI · Clinical intelligence", page_icon=":material/ecg_heart:", layout="wide", initial_sidebar_state="expanded")
 load_styles()
 if os.getenv("APP_MODE", "demo") != "demo":
@@ -28,8 +44,8 @@ if st.session_state.get("workspace_owner_id") != owner_id:
     if session:
         st.session_state.auth_session = session
     st.session_state.workspace_owner_id = owner_id
-    st.session_state.workspace = Workspace.empty() if session else Workspace()
-st.session_state.workspace = Workspace.from_session(st.session_state.get("workspace") or Workspace.empty())
+    st.session_state.workspace = new_workspace(demo=not session)
+st.session_state.workspace = Workspace.from_session(st.session_state.get("workspace") or new_workspace(demo=not session))
 st.session_state.workspace.activate_pending_uploads()
 if session:
     with st.sidebar:
