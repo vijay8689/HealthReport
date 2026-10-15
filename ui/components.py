@@ -71,7 +71,7 @@ def patient_snapshot(patient, workspace):
 
 
 def footer():
-    html(f'<div class="footer"><span>HealthLens AI &nbsp; / &nbsp; Clinical document intelligence<br>© {date.today().year} Vijay Kumar Kothapalli. All rights reserved.</span><span>Synthetic demonstration · Research and education only.<br>Does not replace professional medical evaluation, diagnosis, or treatment.</span></div>')
+    html(f'<div class="footer"><span>HealthLens AI &nbsp; / &nbsp; Clinical document intelligence<br>© {date.today().year} Vijay Kumar Kothapalli and Sumana Pattapu. All rights reserved.</span><span>Synthetic demonstration · Research and education only.<br>Does not replace professional medical evaluation, diagnosis, or treatment.</span></div>')
 
 
 def workspace():
