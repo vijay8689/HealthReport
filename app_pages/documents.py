@@ -38,13 +38,13 @@ if tab == "Upload reports":
                             if ws.add(doc, extracted, upload.getvalue()):
                                 imported_patient_ids.append(doc.patient_id)
                                 st.session_state.last_import_patient_id = doc.patient_id
-                                if doc.status == "Quarantined":
-                                    st.warning(f"{doc.name}: quarantined. " + " ".join(doc.warnings))
-                                else:
+                                if extracted:
                                     st.success(f"{doc.name}: {len(extracted)} observations saved and available across the workspace.")
-                                    sync_document(doc)
-                                    for warning in doc.warnings:
-                                        st.info(warning)
+                                else:
+                                    st.warning(f"{doc.name}: source document saved, but no numeric lab results were extracted. Open Library to view the source text.")
+                                sync_document(doc)
+                                for warning in doc.warnings:
+                                    st.info(warning)
                             else:
                                 st.info(f"{upload.name}: duplicate content skipped.")
                         except IntakeError as error:

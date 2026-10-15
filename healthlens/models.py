@@ -63,6 +63,7 @@ class Document(BaseModel):
     created_at: str = Field(default_factory=timestamp)
     ocr: bool = False
     version: int = 1
+    extraction_version: int = 0
     warnings: list[str] = Field(default_factory=list)
 
 

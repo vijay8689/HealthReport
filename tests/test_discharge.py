@@ -73,6 +73,12 @@ def test_missing_patient_name_is_quarantined():
     document, summary = ingest_discharge(pdf_bytes("No patient header"), "discharge.pdf", "P-1", "Alex Morgan")
     assert document.status == "Quarantined"
     assert summary.status == "quarantined"
+    ws = Workspace.empty()
+    with pytest.raises(IntakeError, match="Document not saved"):
+        ws.add_discharge(document, summary, b"original")
+    assert ws.documents == []
+    assert ws.discharge_summaries == []
+    assert ws.originals == {}
 
 
 @pytest.mark.parametrize("text", [
@@ -128,7 +134,10 @@ def test_existing_named_quarantined_discharge_is_released_on_session_upgrade(tex
     summary.status = "quarantined"
     document.warnings.append(warning)
     ws = Workspace()
-    ws.add_discharge(document, summary, original)
+    # Simulate records retained by a session from before storage validation.
+    ws.documents.append(document)
+    ws.discharge_summaries.append(summary)
+    ws.originals[document.id] = original
     upgraded = Workspace.from_session(ws)
     assert upgraded.discharges("P-1")[0].status == "needs_review"
     assert document.status == "Needs review"

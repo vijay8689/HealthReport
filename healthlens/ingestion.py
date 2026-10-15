@@ -156,7 +156,9 @@ def parse_bytes(content: bytes, filename: str) -> tuple[list[dict], bool]:
 
 
 def normalize_patient_name(value: str) -> str:
-    value = re.sub(r"^(?:(?:mrs|mr|ms|miss|dr)(?:\.\s*|\s+))+", "", value.strip(), flags=re.I)
+    value = value.strip().lstrip(" .:-|")
+    value = re.sub(r"^(?:(?:mrs|mr|ms|miss|dr)(?:\.\s*|\s+))+", "", value, flags=re.I)
+    value = value.strip(" .:-|")
     return " ".join(value.casefold().split())
 
 
@@ -169,7 +171,7 @@ def patient_name_matches(profile_name: str, report_name: str) -> bool:
 
 def _patient_names(pages: list[dict]) -> set[str]:
     text = "\n".join(page["text"] for page in pages)
-    pattern = r"^[ \t]*(?:Patient[ \t]+Name|Patient|Name)(?:[ \t]*\([^\r\n)]*\))?\s*:[ \t]*(?:\r?\n[ \t]*)?([^\r\n]+)"
+    pattern = r"^[ \t]*(?:(?:Patient|Customer)[ \t]+Name|Patient|Name)(?:[ \t]*\([^\r\n)]*\))?\s*:[ \t]*(?:\r?\n[ \t]*)?([^\r\n]+)"
     names = set()
     for match in re.finditer(pattern, text, re.I | re.M):
         parts = [match.group(1).strip()]
@@ -178,10 +180,17 @@ def _patient_names(pages: list[dict]) -> set[str]:
             line = line.strip()
             if not line or not re.fullmatch(r"[^\W\d_]+(?:[ .'-]+[^\W\d_]+)*\.?", line, re.UNICODE):
                 break
-            if re.match(r"(?:patient|age|gender|sex|date|report|sample|test|health|doctor|referr)\b", line, re.I):
+            if re.match(r"(?:patient|customer|age|gender|sex|date|report|sample|test|health|doctor|referr|appointment|collected|collection|lab|barcode)\b", line, re.I):
                 break
             parts.append(line)
-        names.add(normalize_patient_name(" ".join(parts)))
+        candidate = " ".join(parts).lstrip(" .:-|")
+        # PDF reading order can attach adjacent appointment/age fields to names.
+        candidate = re.split(
+            r"\b(?:appointment\s*(?:id|no|number)|patient\s*(?:id|no|number)|age|gender|sex|uhid|tid|collected\s+via|collection\s+date|referred\s+by|lab\s+visit|barcode)\b",
+            candidate, maxsplit=1, flags=re.I,
+        )[0].strip(" .:-|")
+        if re.fullmatch(r"[^\W\d_]+(?:[ .'-]+[^\W\d_]+)*\.?", candidate, re.UNICODE):
+            names.add(normalize_patient_name(candidate))
     return names
 
 
@@ -199,8 +208,8 @@ def _looks_like_name(value: str) -> bool:
 
 def _observation_dates(text: str) -> set[date]:
     # Collection dates describe the measurements; receipt/print dates do not.
-    labels = [r"(?:Sample\s+Collected\s+on|Collected|Collection\s+Date|Sample\s+Collection\s+Date)",
-              r"(?:Observation\s+Date|Date)", r"(?:Reported|Report\s+Date)"]
+    labels = [r"(?:Sample\s+Collected\s+on|Collected(?:\s+On)?|Collection\s+Date(?:\s*/\s*Time)?|Sample\s+Collection\s+Date)",
+              r"(?:Observation\s+Date|Date)", r"(?:Reported(?:\s+On)?|Report\s+Date)"]
     token = r"(\d{4}-\d{2}-\d{2}|\d{1,2}[-/](?:[A-Za-z]{3,9}|\d{1,2})[-/]\d{4})"
     for label in labels:
         values = re.findall(rf"^\s*{label}\s*:\s*{token}", text, re.I | re.M)
@@ -279,6 +288,8 @@ def _table_observations(page: dict, patient_id: str, document_id: str,
 
 def _block_observations(page: dict, patient_id: str, document_id: str,
                         fallback_date: date | None) -> list[Observation]:
+    if all(label in page["text"] for label in ("Biological Reference Range", "Investigation", "Result", "Units")):
+        return []  # This layout stores range/value/unit/name, not name/value/range.
     raw = page["text"].splitlines()
     lines = [_clean(line) for line in raw]
     observed_on = _page_date(page["text"], fallback_date)
@@ -313,6 +324,115 @@ def _block_observations(page: dict, patient_id: str, document_id: str,
     return results
 
 
+def _multiline_observations(page: dict, patient_id: str, document_id: str,
+                            fallback_date: date | None) -> list[Observation]:
+    """Read explicit observed-value tables without treating explanatory numbers as results."""
+    raw = page["text"].splitlines()
+    lines = [_clean(line) for line in raw]
+    text = page["text"]
+    starred = "Observed Values" in text and "Test Name" in text
+    three_column = "Observed Value" in text and "Investigation" in text
+    reversed_columns = all(label in text for label in ("Biological Reference Range", "Investigation", "Result", "Units"))
+    five_column = all(label in lines for label in ("Test Name", "Result", "Unit", "Bio. Ref. Interval", "Method"))
+    if not (starred or three_column or reversed_columns or five_column):
+        return []
+    results = []
+    for index, line in enumerate(lines):
+        number = BLOCK_VALUE.fullmatch(line)
+        if not number or index == 0:
+            continue
+        method = "Not recorded"
+        if five_column:
+            if index + 2 >= len(lines):
+                continue
+            name = lines[index - 1]
+            unit, reference = lines[index + 1:index + 3]
+            if not re.fullmatch(r"[A-Za-z][A-Za-z0-9 /,&().%\-]{0,109}", name):
+                continue
+            if len(unit) > 35 or not (re.search(r"[/^%\u00b5]", unit) or unit in {"fL", "pg", "Ratio"}):
+                continue
+            start, end = index - 1, index + 2
+            if end + 1 < len(lines) and len(lines[end + 1]) < 100 and not lines[end + 1].endswith(":"):
+                method = lines[end + 1]
+                end += 1
+        elif reversed_columns:
+            if index + 2 >= len(lines):
+                continue
+            unit, name = lines[index + 1:index + 3]
+            if not _looks_like_name(name) or not re.search(r"[A-Za-z%\ufffd]", unit) or len(unit) > 35:
+                continue
+            # Source reading order is reference, value, unit, investigation.
+            reference = lines[index - 1]
+            start, end = index - 1, index + 2
+            if end + 1 < len(lines) and re.match(r"Method\s*:", lines[end + 1], re.I):
+                end += 1
+                method = re.sub(r"^Method\s*:\s*", "", lines[end], flags=re.I)
+        elif starred:
+            # A result must immediately follow its starred name or method.
+            start = index - 1
+            while start >= 0 and index - start <= 6 and not lines[start].startswith("*"):
+                if BLOCK_VALUE.fullmatch(lines[start]):
+                    break
+                start -= 1
+            if start < 0 or not lines[start].startswith("*"):
+                continue
+            before = lines[start:index]
+            method_index = next((i for i, value in enumerate(before) if re.match(r"Method\s*:", value, re.I)), len(before))
+            name = " ".join(before[:method_index]).lstrip("* ").rstrip("., ")
+            if method_index < len(before):
+                method = re.sub(r"^Method\s*:\s*", "", before[method_index], flags=re.I)
+            unit = lines[index + 1] if index + 1 < len(lines) else ""
+            if not unit or unit.startswith("*"):
+                unit = "Not recorded"
+            elif len(unit) > 35:
+                continue
+            # Some source rows omit units entirely. Keep the value without guessing.
+            if re.match(r"(?:Method\s*:|Dr\b|INTERPRET|Name\b)", unit, re.I):
+                unit = "Not recorded"
+            reference = lines[index + 2] if unit != "Not recorded" and index + 2 < len(lines) else ""
+            end = index + (2 if unit != "Not recorded" else 0)
+        else:
+            start = index - 1
+            if re.match(r"Method\s*:", lines[start], re.I):
+                method = re.sub(r"^Method\s*:\s*", "", lines[start], flags=re.I)
+                start -= 1
+            if start < 0:
+                continue
+            name = lines[start].rstrip("., ")
+            if not re.fullmatch(r"[A-Za-z][A-Za-z0-9 /,&().%\-]{0,109}", name):
+                continue
+            reference = lines[index + 1] if index + 1 < len(lines) else ""
+            # Three-column tables encode units after the reference interval.
+            limits = re.fullmatch(rf"({NUMBER})\s*[-\u2013\u2014\ufffd]\s*({NUMBER})\s*(.*)", reference)
+            if not limits:
+                continue
+            unit = limits.group(3) or "Not recorded"
+            end = index + 1
+        low = high = None
+        limits = re.fullmatch(rf"({NUMBER})\s*[-\u2013\u2014\ufffd]\s*({NUMBER})", reference)
+        if limits:
+            low, high = map(float, limits.groups())
+        elif three_column:
+            limits = re.fullmatch(rf"({NUMBER})\s*[-\u2013\u2014\ufffd]\s*({NUMBER})\s*(.*)", reference)
+            if limits:
+                low, high = map(float, limits.groups()[:2])
+        # Labelled, sex-specific and diagnostic ranges stay in the source text.
+        # They must not be converted into a single guessed normal interval.
+        try:
+            results.append(Observation(
+                patient_id=patient_id, document_id=document_id, name=name,
+                category=next((category for token, category in CATEGORIES.items() if token in name.lower()), "General"),
+                value=float(number.group("value").replace(",", "")), original_value=line,
+                comparator=number.group("cmp") or "=", unit=unit,
+                low=low, high=high, date=_page_date(text, fallback_date), method=method,
+                locator=f"{page['locator']}, lines {start + 1}-{min(end + 1, len(raw))}",
+                source_text="\n".join(raw[start:min(end + 1, len(raw))]), status="accepted",
+            ))
+        except ValueError:
+            continue
+    return results
+
+
 def ingest(content: bytes, filename: str, patient_id: str,
            patient_name: str | None = None) -> tuple[Document, list[Observation]]:
     pages, used_ocr = parse_bytes(content, filename)
@@ -325,7 +445,7 @@ def ingest(content: bytes, filename: str, patient_id: str,
     dates = set().union(*(_observation_dates(page["text"]) for page in pages))
     report_date = next(iter(dates)) if len(dates) == 1 else None
     doc = Document(patient_id=target_patient_id, name=Path(filename).name, date=report_date,
-                   hash=hashlib.sha256(content).hexdigest(), pages=pages, ocr=used_ocr)
+                   hash=hashlib.sha256(content).hexdigest(), pages=pages, ocr=used_ocr, extraction_version=2)
     if mismatch or not names:
         doc.status = "Quarantined"
         if not names:
@@ -363,6 +483,7 @@ def ingest(content: bytes, filename: str, patient_id: str,
             except ValueError:
                 doc.warnings.append(f"Invalid range/value at {locator}; row excluded.")
         observations.extend(_block_observations(page, target_patient_id, doc.id, report_date))
+        observations.extend(_multiline_observations(page, target_patient_id, doc.id, report_date))
     unique = {}
     for observation in observations:
         key = (observation.name, observation.date, observation.value,

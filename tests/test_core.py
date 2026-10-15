@@ -44,6 +44,12 @@ def test_patient_name_mismatch_quarantined(text):
     doc, obs = ingest(text.encode(), "sample.txt", "HL-2048", patient_name="Alex Morgan")
     assert doc.status == "Quarantined"
     assert obs == []
+    ws = Workspace.empty()
+    with pytest.raises(IntakeError, match="Document not saved"):
+        ws.add(doc, obs, text.encode())
+    assert ws.documents == []
+    assert ws.observations == []
+    assert ws.originals == {}
 
 
 @pytest.mark.parametrize("name", ["ALEX MORGAN", "  Alex   Morgan  ", "Mr. Alex Morgan"])
@@ -200,6 +206,49 @@ def test_wrapped_patient_name_header():
     doc, observations = ingest(content.encode(), "wrapped.txt", "HL-2048", patient_name="Alex Morgan")
     assert doc.status == "Imported"
     assert len(observations) == 4
+
+
+@pytest.mark.parametrize("prefix", [".", "Mrs. .", "Ms ."])
+def test_repeated_patient_headers_ignore_adjacent_appointment_and_demographics(prefix):
+    content = SAMPLE.replace("Patient: Alex Morgan", (
+        f"Patient: {prefix} Sumana Pattapu Appointment ID TID: 277693287\n"
+        "Name: 31 years / female\nPatient Name: Sumana Pattapu"
+    ))
+    doc, observations = ingest(content.encode(), "277693287.txt", "P-SUMANA", patient_name="Sumana")
+    assert doc.status == "Imported"
+    assert len(observations) == 4
+    ws = Workspace.empty()
+    assert ws.add(doc, observations, content.encode())
+    assert doc in ws.documents
+
+
+def test_demographics_alone_do_not_count_as_patient_name():
+    content = SAMPLE.replace("Patient: Alex Morgan", "Name: 31 years / female")
+    doc, observations = ingest(content.encode(), "missing.txt", "P-SUMANA", patient_name="Sumana")
+    assert doc.status == "Quarantined"
+    assert observations == []
+
+
+@pytest.mark.parametrize("header", [
+    "Customer Name : Ms.SUMANA PATTAPU",
+    "Customer Name\n: Ms.SUMANA PATTAPU",
+    "Customer Name : Ms.SUMANA PATTAPU    Collected Via : TATA 1MG HYDERABAD",
+    "Customer Name : Ms.SUMANA PATTAPU\nCollected Via\n: TATA 1MG HYDERABAD",
+])
+def test_customer_name_header_is_accepted(header):
+    content = SAMPLE.replace("Patient: Alex Morgan", header)
+    doc, observations = ingest(content.encode(), "Data_Sumana.txt", "P-002", "Sumana")
+    assert doc.status == "Imported"
+    assert len(observations) == 4
+    ws = Workspace.empty()
+    assert ws.add(doc, observations, content.encode())
+
+
+def test_customer_name_still_requires_matching_profile():
+    content = SAMPLE.replace("Patient: Alex Morgan", "Customer Name : Ms.Other Patient")
+    doc, observations = ingest(content.encode(), "other.txt", "P-002", "Sumana")
+    assert doc.status == "Quarantined"
+    assert observations == []
 
 
 @pytest.mark.parametrize("name", ["Mr.Vijay Kumar Kothapalli", "MR. VIJAY KUMAR KOTHAPALLI", "Vijay Kumar Kothapalli"])

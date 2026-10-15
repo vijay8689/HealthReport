@@ -2,7 +2,7 @@
 import plotly.graph_objects as go
 
 
-def lab_chart(observations, show_range=True, height=265):
+def lab_chart(observations, show_range=True, height=265, display_unit=None):
     rows = sorted([o for o in observations if o.date and o.comparator == "=" and o.status in {"accepted", "corrected"}], key=lambda o: o.date)
     fig = go.Figure()
     if not rows:
@@ -24,6 +24,6 @@ def lab_chart(observations, show_range=True, height=265):
         font=dict(family="Segoe UI, sans-serif", color="#7b8d99", size=10),
         showlegend=False, hovermode="x unified", dragmode=False,
         xaxis=dict(showgrid=False, tickformat="%b %y", tickmode="array", tickvals=x, zeroline=False),
-        yaxis=dict(gridcolor="#edf1f4", zeroline=False, title=rows[0].unit))
+        yaxis=dict(gridcolor="#edf1f4", zeroline=False, title=display_unit or rows[0].unit))
     return fig
 

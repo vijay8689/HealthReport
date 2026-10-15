@@ -26,8 +26,6 @@ with st.container(border=True):
                     saved = ws.add_discharge(document, summary, content)
                 if not saved:
                     st.info("This discharge document has already been uploaded for this patient.")
-                elif summary.status == "quarantined":
-                    st.warning("Saved in quarantine. No readable patient name was found in the document.")
                 else:
                     st.success("Discharge summary saved in separate sections. Check the extracted details against the source.")
                     sync_document(document)

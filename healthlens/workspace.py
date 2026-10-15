@@ -3,6 +3,7 @@ import hashlib
 
 from healthlens.demo import PATIENTS, demo_records
 from healthlens.discharge import discharge_patient_names
+from healthlens.ingestion import IntakeError, _multiline_observations, _observation_dates
 from healthlens.models import DischargeSummary, Document, Observation, Revision
 from healthlens.workflow import analyze
 
@@ -58,6 +59,7 @@ class Workspace:
                 document.warnings = [warning for warning in document.warnings
                                      if not warning.startswith(("Patient name could not be matched to the selected profile.",
                                                                 "No patient name was found in the document."))]
+        workspace.extract_stored_text_reports()
         return workspace
 
     def ensure_demo_records(self):
@@ -105,6 +107,40 @@ class Workspace:
             known.add(identity)
             changed = True
         if changed:
+            self.extract_stored_text_reports()
+            self.refresh_analysis(patient_id)
+
+    def extract_stored_text_reports(self):
+        """Recover missing results from earlier local or cloud extraction versions."""
+        changed = set()
+        for document in self.documents:
+            if document.kind != "Laboratory report" or document.status not in {"Text only", "Imported"}:
+                continue
+            if document.status != "Text only" and getattr(document, "extraction_version", 0) >= 2:
+                continue
+            dates = set().union(*(_observation_dates(page["text"]) for page in document.pages))
+            report_date = next(iter(dates)) if len(dates) == 1 else document.date
+            extracted = [observation for page in document.pages
+                         for observation in _multiline_observations(page, document.patient_id, document.id, report_date)]
+            document.extraction_version = 2
+            if not extracted:
+                continue
+            existing = {(o.name, o.date, o.value, o.unit) for o in self.observations if o.document_id == document.id}
+            unique = {}
+            for observation in extracted:
+                key = (observation.name, observation.date, observation.value, observation.unit)
+                if key not in existing:
+                    unique.setdefault(key, observation)
+            if not unique and document.status != "Text only":
+                continue
+            self.observations.extend(unique.values())
+            document.status = "Imported"
+            document.date = report_date
+            document.warnings = [warning for warning in document.warnings
+                                 if not warning.startswith("No supported numeric laboratory rows found.")
+                                 and not (report_date and warning.startswith("No single observation date"))]
+            changed.add(document.patient_id)
+        for patient_id in changed:
             self.refresh_analysis(patient_id)
 
     def docs(self, patient_id) -> list[Document]:
@@ -118,6 +154,8 @@ class Workspace:
         return [s for s in self.discharge_summaries if s.patient_id == patient_id]
 
     def add_discharge(self, document, summary, original) -> bool:
+        if document.status == "Quarantined" or summary.status == "quarantined":
+            raise IntakeError("Document not saved. A readable patient name must be present in the document.")
         if document.kind != "Discharge summary" or summary.patient_id != document.patient_id or summary.document_id != document.id:
             raise ValueError("Discharge summary does not belong to the imported document.")
         if any(d.hash == document.hash and d.patient_id == document.patient_id and d.kind == document.kind for d in self.documents):
@@ -133,6 +171,8 @@ class Workspace:
         return hashlib.sha256(manifest.encode()).hexdigest()
 
     def add(self, document, observations, original) -> bool:
+        if document.status == "Quarantined":
+            raise IntakeError("Document not saved. " + " ".join(document.warnings))
         if any(o.patient_id != document.patient_id or o.document_id != document.id for o in observations):
             raise ValueError("Observation does not belong to the imported document.")
         previous = next((d for d in self.documents if d.hash == document.hash and d.patient_id == document.patient_id), None)

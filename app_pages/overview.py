@@ -3,6 +3,8 @@ from datetime import timedelta
 import streamlit as st
 
 from healthlens.analytics import comparison, latest, trends
+from healthlens.markers import marker_key
+from ui.marker_selector import select_marker
 from ui.charts import lab_chart
 from ui.components import doc_rows, e, heading, hero, html, panel_title, patient_id, patient_snapshot, stats, workspace
 
@@ -22,22 +24,25 @@ obs = ws.obs(pid)
 with main:
     with st.container(border=True, key="chart_panel"):
         panel_title("The bigger picture", "Follow a result over time. Reference ranges come from each source report.")
-        choices = sorted({(o.name, o.unit) for o in obs if o.status in {"accepted", "corrected"}})
+        choices = sorted({marker_key(o) for o in obs if o.status in {"accepted", "corrected"}})
         if choices:
             a, b = st.columns([1.7, 1.1], vertical_alignment="bottom")
             with a:
-                selected = st.selectbox("Lab marker", choices, index=next((i for i,x in enumerate(choices) if x[0] == "Fasting glucose"), 0), format_func=lambda x:x[0], key=f"overview_marker_{pid}", label_visibility="collapsed")
+                selected, rows = select_marker([o for o in obs if o.status in {"accepted", "corrected"}],
+                                               label="Lab marker", key=f"overview_marker_{pid}", label_visibility="collapsed")
             with b:
                 period = st.segmented_control("Period", ["6M", "1Y", "All"], default="All", key=f"overview_period_{pid}", label_visibility="collapsed")
-            rows = [o for o in obs if (o.name, o.unit) == selected]
             dated = [o.date for o in rows if o.date]
             if dated and period in {"6M", "1Y"}:
                 start = max(dated) - timedelta(days=183 if period == "6M" else 365)
                 rows = [o for o in rows if o.date and o.date >= start]
-            st.plotly_chart(lab_chart(rows), config={"displayModeBar": False}, key="overview_plot")
+            st.plotly_chart(lab_chart(rows, display_unit=selected[1]), config={"displayModeBar": False}, key="overview_plot")
             st.caption("● Recorded value   ·   Shaded area: source reference range")
         else:
-            st.info("Upload a report to see the first trend.")
+            if ws.docs(pid):
+                st.info("Your documents are saved, but no numeric lab results are available for trends. Open Documents to check the extracted source text.")
+            else:
+                st.info("Upload a report to see the first trend.")
 with side:
     with st.container(border=True, key="snapshot_panel"):
         panel_title("Patient snapshot", "A little context for the bigger picture")
