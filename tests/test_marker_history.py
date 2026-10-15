@@ -100,3 +100,21 @@ def test_overview_and_trends_list_each_test_once_across_unit_contexts():
     options = next(widget for widget in app.selectbox if widget.label == "Choose a test").options
     assert sum(option.startswith("Red blood cell count ·") for option in options) == 1
     assert sum(option.startswith("White blood cell count ·") for option in options) == 1
+
+
+@pytest.mark.usefixtures("signed_in_demo")
+def test_pages_work_with_chart_helper_retained_from_older_release():
+    from unittest.mock import patch
+    from streamlit.testing.v1 import AppTest
+    from ui.charts import lab_chart
+
+    def previous_chart(observations, show_range=True, height=265):
+        return lab_chart(observations, show_range, height)
+
+    with patch("ui.charts.lab_chart", side_effect=previous_chart):
+        app = AppTest.from_file("app.py", default_timeout=30).run()
+        assert not app.exception
+        assert app.get("plotly_chart")
+        app.switch_page("app_pages/trends.py").run()
+        assert not app.exception
+        assert app.get("plotly_chart")

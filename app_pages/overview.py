@@ -36,7 +36,9 @@ with main:
             if dated and period in {"6M", "1Y"}:
                 start = max(dated) - timedelta(days=183 if period == "6M" else 365)
                 rows = [o for o in rows if o.date and o.date >= start]
-            st.plotly_chart(lab_chart(rows, display_unit=selected[1]), config={"displayModeBar": False}, key="overview_plot")
+            figure = lab_chart(rows)
+            figure.update_yaxes(title_text=selected[1])
+            st.plotly_chart(figure, config={"displayModeBar": False}, key="overview_plot")
             st.caption("● Recorded value   ·   Shaded area: source reference range")
         else:
             if ws.docs(pid):

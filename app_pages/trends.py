@@ -32,7 +32,9 @@ else:
             chosen_dates = st.date_input("Observation date range", value=(min(dates), max(dates)), key=f"trend_dates_{pid}_{choice}_{min(dates)}_{max(dates)}")
             if len(chosen_dates) == 2:
                 rows = [o for o in rows if o.date and chosen_dates[0] <= o.date <= chosen_dates[1]]
-        st.plotly_chart(lab_chart(rows, show_range, 330, display_unit=choice[1]), config={"displayModeBar": False})
+        figure = lab_chart(rows, show_range, 330)
+        figure.update_yaxes(title_text=choice[1])
+        st.plotly_chart(figure, config={"displayModeBar": False})
         if len({o.unit for o in rows}) > 1:
             st.caption("Equivalent unit labels are grouped in this chart. The table keeps each report's original units.")
         if len(dates) < 2 or len(set(dates)) < 2:
